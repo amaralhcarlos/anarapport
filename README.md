@@ -37,6 +37,14 @@ O plugin `maven-shade-plugin` já empacota um jar executável autocontido em
 - **Arquivo → Exportar composição**: renderiza exatamente o que está visível
   na tela (grade, modo de rapport e linhas de emenda, se ativadas) para um
   PNG ou JPEG.
+- **Imagem → Informações da imagem...**: abre um diálogo com dados técnicos
+  do arquivo voltados para quem for retrabalhá-lo em outra ferramenta (ex.:
+  Photoshop) — dimensões em pixels, DPI (quando o arquivo
+  informa), tamanho físico estimado em cm/polegadas, modo de cor, profundidade
+  de bit, perfil ICC embutido, formato, tamanho em disco, caminho, data de
+  modificação e metadados EXIF (câmera, data de captura, orientação), quando
+  presentes. Campos não disponíveis no arquivo aparecem como "Não informado"
+  em vez de serem omitidos.
 
 ## Modos de rapport
 
@@ -57,7 +65,8 @@ O plugin `maven-shade-plugin` já empacota um jar executável autocontido em
 - `render` — `RapportRenderer`, responsável pelo algoritmo de tiling de cada
   modo de rapport (inclui um cache de tiles pré-escalados para manter o pan/
   zoom fluido).
-- `model` — estado da aplicação (`AppState`) e os enums `RapportType` e
-  `SeamStyle`.
-- `io` — carregamento (`ImageLoader`) e exportação (`ImageExporter`) de
-  imagens em disco.
+- `model` — estado da aplicação (`AppState`), os enums `RapportType` e
+  `SeamStyle`, e os registros `ImageMetadata`/`ExifInfo`.
+- `io` — carregamento (`ImageLoader`), exportação (`ImageExporter`) e leitura
+  de metadados técnicos (`ImageMetadataReader`, `ExifReader`) de imagens em
+  disco.

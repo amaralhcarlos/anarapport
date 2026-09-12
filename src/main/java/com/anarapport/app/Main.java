@@ -2,9 +2,12 @@ package com.anarapport.app;
 
 import com.anarapport.io.ImageExporter;
 import com.anarapport.io.ImageLoader;
+import com.anarapport.io.ImageMetadataReader;
 import com.anarapport.model.AppState;
+import com.anarapport.model.ImageMetadata;
 import com.anarapport.model.RapportType;
 import com.anarapport.model.SeamStyle;
+import com.anarapport.ui.ImageInfoDialog;
 import com.anarapport.ui.ImagePanel;
 
 import javax.swing.BorderFactory;
@@ -132,7 +135,24 @@ public class Main {
         fileMenu.add(exportCompositionItem);
 
         menuBar.add(fileMenu);
+
+        JMenu imageMenu = new JMenu("Imagem");
+        JMenuItem imageInfoItem = new JMenuItem("Informações da imagem...");
+        imageInfoItem.addActionListener(event -> showImageInfo(parentFrame, appState));
+        imageMenu.add(imageInfoItem);
+        menuBar.add(imageMenu);
+
         return menuBar;
+    }
+
+    private static void showImageInfo(JFrame parentFrame, AppState appState) {
+        ImageMetadata metadata = appState.getImageMetadata();
+        if (metadata == null) {
+            JOptionPane.showMessageDialog(parentFrame, "Carregue uma imagem antes de ver suas informações.",
+                    "Nenhuma imagem carregada", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        ImageInfoDialog.show(parentFrame, metadata);
     }
 
     /**
@@ -197,9 +217,11 @@ public class Main {
     }
 
     /**
-     * Loading decodes an image file (disk I/O + decoding), which can take a
-     * noticeable while for large files, so it runs off the EDT in a SwingWorker;
-     * only the file chooser and the final AppState update happen on the EDT.
+     * Loading decodes an image file and reads its technical metadata (disk I/O +
+     * decoding + header parsing), which can take a noticeable while for large
+     * files, so both run off the EDT in a single SwingWorker; only the file
+     * chooser and the final AppState update happen on the EDT. The metadata is
+     * only shown on demand via "Imagem > Informações da imagem...".
      */
     private static void openImage(JFrame parentFrame, AppState appState, JMenuItem triggeringItem) {
         JFileChooser fileChooser = new JFileChooser();
@@ -212,17 +234,21 @@ public class Main {
 
         File selectedFile = fileChooser.getSelectedFile();
         triggeringItem.setEnabled(false);
-        new SwingWorker<BufferedImage, Void>() {
+        new SwingWorker<LoadedImage, Void>() {
             @Override
-            protected BufferedImage doInBackground() throws IOException {
-                return ImageLoader.load(selectedFile);
+            protected LoadedImage doInBackground() throws IOException {
+                BufferedImage image = ImageLoader.load(selectedFile);
+                ImageMetadata metadata = ImageMetadataReader.read(selectedFile);
+                return new LoadedImage(image, metadata);
             }
 
             @Override
             protected void done() {
                 triggeringItem.setEnabled(true);
                 try {
-                    appState.setImage(get());
+                    LoadedImage loaded = get();
+                    appState.setImage(loaded.image());
+                    appState.setImageMetadata(loaded.metadata());
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                 } catch (ExecutionException e) {
@@ -231,6 +257,9 @@ public class Main {
                 }
             }
         }.execute();
+    }
+
+    private record LoadedImage(BufferedImage image, ImageMetadata metadata) {
     }
 
     /**

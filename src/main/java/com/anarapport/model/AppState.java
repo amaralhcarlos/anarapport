@@ -18,6 +18,7 @@ public class AppState {
     public static final String PROPERTY_SEAM_STYLE = "seamStyle";
     public static final String PROPERTY_CELL_OFFSET_X = "cellOffsetXPercent";
     public static final String PROPERTY_CELL_OFFSET_Y = "cellOffsetYPercent";
+    public static final String PROPERTY_IMAGE_METADATA = "imageMetadata";
 
     public static final int MIN_GRID_SIZE = 3;
     public static final int MAX_GRID_SIZE = 9;
@@ -37,6 +38,7 @@ public class AppState {
     private SeamStyle seamStyle = SeamStyle.DARK_GRAY_SOLID;
     private int cellOffsetXPercent = DEFAULT_CELL_OFFSET_PERCENT;
     private int cellOffsetYPercent = DEFAULT_CELL_OFFSET_PERCENT;
+    private ImageMetadata imageMetadata;
 
     public BufferedImage getImage() {
         return image;
@@ -113,6 +115,16 @@ public class AppState {
 
     private static int clampCellOffsetPercent(int percent) {
         return Math.max(MIN_CELL_OFFSET_PERCENT, Math.min(MAX_CELL_OFFSET_PERCENT, percent));
+    }
+
+    public ImageMetadata getImageMetadata() {
+        return imageMetadata;
+    }
+
+    public void setImageMetadata(ImageMetadata imageMetadata) {
+        ImageMetadata old = this.imageMetadata;
+        this.imageMetadata = imageMetadata;
+        support.firePropertyChange(PROPERTY_IMAGE_METADATA, old, imageMetadata);
     }
 
     public void addPropertyChangeListener(PropertyChangeListener listener) {
