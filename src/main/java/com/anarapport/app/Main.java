@@ -2,9 +2,11 @@ package com.anarapport.app;
 
 import com.anarapport.io.ImageLoader;
 import com.anarapport.model.AppState;
+import com.anarapport.model.RapportType;
 import com.anarapport.ui.ImagePanel;
 
 import javax.swing.BorderFactory;
+import javax.swing.JComboBox;
 import javax.swing.JFileChooser;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
@@ -82,8 +84,16 @@ public class Main {
         JSpinner gridSizeSpinner = new JSpinner(gridSizeModel);
         gridSizeSpinner.addChangeListener(event -> appState.setGridSize((Integer) gridSizeSpinner.getValue()));
 
+        JLabel rapportTypeLabel = new JLabel("Modo de rapport:");
+        JComboBox<RapportType> rapportTypeCombo = new JComboBox<>(RapportType.values());
+        rapportTypeCombo.setSelectedItem(appState.getRapportType());
+        rapportTypeCombo.addActionListener(event ->
+                appState.setRapportType((RapportType) rapportTypeCombo.getSelectedItem()));
+
         controlsPanel.add(gridSizeLabel);
         controlsPanel.add(gridSizeSpinner);
+        controlsPanel.add(rapportTypeLabel);
+        controlsPanel.add(rapportTypeCombo);
         return controlsPanel;
     }
 
