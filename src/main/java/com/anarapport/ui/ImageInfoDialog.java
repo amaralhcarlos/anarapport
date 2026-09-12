@@ -7,7 +7,9 @@ import com.anarapport.analysis.EdgeContinuityResult;
 import com.anarapport.analysis.GamutCheckResult;
 import com.anarapport.analysis.ImageAnalyzer;
 import com.anarapport.analysis.ResolutionCheck;
+import com.anarapport.i18n.Messages;
 import com.anarapport.io.ImageMetadataReader;
+import com.anarapport.model.ColorMode;
 import com.anarapport.model.ExifInfo;
 import com.anarapport.model.ImageMetadata;
 
@@ -35,10 +37,9 @@ import java.awt.GridBagLayout;
 import java.awt.Insets;
 import java.awt.image.BufferedImage;
 import java.io.File;
-import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.time.format.FormatStyle;
 import java.util.List;
-import java.util.Locale;
 import java.util.concurrent.ExecutionException;
 
 /**
@@ -47,18 +48,18 @@ import java.util.concurrent.ExecutionException;
  * color mode/bit depth, ICC profile, file info and EXIF, when available. Also
  * offers an on-demand "advanced analysis" section (pixel-level metrics), run
  * via {@link ImageAnalyzer} in a background SwingWorker with a progress bar.
+ *
+ * <p>Built fresh every time {@link #show} is called, so it always reflects
+ * whatever language is active at that moment -- no special handling is needed
+ * for a runtime language switch here.
  */
 public final class ImageInfoDialog {
-
-    private static final Locale PT_BR = Locale.forLanguageTag("pt-BR");
-    private static final DateTimeFormatter LAST_MODIFIED_FORMAT = DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm", PT_BR);
-    private static final String NOT_AVAILABLE = "Não informado";
 
     private ImageInfoDialog() {
     }
 
     public static void show(JFrame owner, ImageMetadata metadata, BufferedImage image) {
-        JDialog dialog = new JDialog(owner, "Informações da imagem", false);
+        JDialog dialog = new JDialog(owner, Messages.get("dialog.info.title"), false);
         dialog.setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE);
 
         JPanel root = new JPanel();
@@ -78,48 +79,51 @@ public final class ImageInfoDialog {
         panel.setBorder(BorderFactory.createEmptyBorder(12, 16, 12, 16));
 
         int row = 0;
-        row = addSectionTitle(panel, "Arquivo", row);
-        row = addRow(panel, "Nome:", metadata.fileName(), row);
-        row = addRow(panel, "Caminho completo:", metadata.filePath(), row);
-        row = addRow(panel, "Formato:", metadata.fileFormat(), row);
-        row = addRow(panel, "Tamanho em disco:", formatFileSize(metadata.fileSizeBytes()), row);
-        row = addRow(panel, "Última modificação:", formatLastModified(metadata), row);
+        row = addSectionTitle(panel, Messages.get("dialog.info.section.file"), row);
+        row = addRow(panel, Messages.get("dialog.info.file.name"), metadata.fileName(), row);
+        row = addRow(panel, Messages.get("dialog.info.file.path"), metadata.filePath(), row);
+        row = addRow(panel, Messages.get("dialog.info.file.format"), metadata.fileFormat(), row);
+        row = addRow(panel, Messages.get("dialog.info.file.size"), formatFileSize(metadata.fileSizeBytes()), row);
+        row = addRow(panel, Messages.get("dialog.info.file.modified"), formatLastModified(metadata), row);
 
-        row = addSectionTitle(panel, "Dimensões", row);
-        row = addRow(panel, "Pixels:", metadata.pixelWidth() + " x " + metadata.pixelHeight() + " px", row);
-        row = addRow(panel, "Resolução:", formatDpi(metadata), row);
-        row = addRow(panel, "Tamanho físico estimado:", formatPhysicalSize(metadata), row);
+        row = addSectionTitle(panel, Messages.get("dialog.info.section.dimensions"), row);
+        row = addRow(panel, Messages.get("dialog.info.dimensions.pixels"),
+                Messages.get("dialog.info.dimensions.pixelsValue", metadata.pixelWidth(), metadata.pixelHeight()), row);
+        row = addRow(panel, Messages.get("dialog.info.dimensions.resolution"), formatDpi(metadata), row);
+        row = addRow(panel, Messages.get("dialog.info.dimensions.physicalSize"), formatPhysicalSize(metadata), row);
 
-        row = addSectionTitle(panel, "Cor", row);
-        row = addRow(panel, "Modo de cor:", orDefault(metadata.colorMode()), row);
-        row = addRow(panel, "Profundidade de bit:", formatBitDepth(metadata.bitsPerChannel()), row);
-        row = addRow(panel, "Perfil ICC embutido:", orDefault(metadata.iccProfileName(), "Nenhum"), row);
+        row = addSectionTitle(panel, Messages.get("dialog.info.section.color"), row);
+        row = addRow(panel, Messages.get("dialog.info.color.mode"), formatColorMode(metadata), row);
+        row = addRow(panel, Messages.get("dialog.info.color.bitDepth"), formatBitDepth(metadata.bitsPerChannel()), row);
+        row = addRow(panel, Messages.get("dialog.info.color.icc"),
+                orDefault(metadata.iccProfileName(), Messages.get("common.none")), row);
 
-        row = addSectionTitle(panel, "EXIF", row);
+        row = addSectionTitle(panel, Messages.get("dialog.info.section.exif"), row);
         ExifInfo exif = metadata.exif();
         if (exif.isEmpty()) {
-            addRow(panel, "Metadados EXIF:", "Não encontrados neste arquivo", row);
+            addRow(panel, Messages.get("dialog.info.exif.camera"), Messages.get("dialog.info.exif.none"), row);
         } else {
-            row = addRow(panel, "Câmera/scanner:", formatCameraSource(exif), row);
-            row = addRow(panel, "Data de captura:", orDefault(exif.captureDate()), row);
-            addRow(panel, "Orientação:", orDefault(exif.orientation()), row);
+            row = addRow(panel, Messages.get("dialog.info.exif.camera"), formatCameraSource(exif), row);
+            row = addRow(panel, Messages.get("dialog.info.exif.captureDate"), orDefault(exif.captureDate()), row);
+            addRow(panel, Messages.get("dialog.info.exif.orientation"), formatOrientation(exif.orientationCode()), row);
         }
 
         return panel;
     }
 
     /**
-     * Builds the "Análise avançada" section: print-size/DPI-threshold inputs, an
-     * "Analisar imagem" button, a progress bar, and a results area that starts
-     * empty and is replaced after each run. Nothing here runs until the button
-     * is clicked, since the analysis is pixel-level and can take a while.
+     * Builds the "Análise avançada"/"Advanced analysis" section: print-size/
+     * DPI-threshold inputs, an "Analisar imagem"/"Analyze image" button, a
+     * progress bar, and a results area that starts empty and is replaced after
+     * each run. Nothing here runs until the button is clicked, since the
+     * analysis is pixel-level and can take a while.
      */
     private static JPanel buildAdvancedAnalysisSection(JDialog dialog, ImageMetadata metadata, BufferedImage image) {
         JPanel section = new JPanel(new GridBagLayout());
         section.setBorder(BorderFactory.createEmptyBorder(0, 16, 12, 16));
 
         int row = 0;
-        row = addSectionTitle(section, "Análise avançada", row);
+        row = addSectionTitle(section, Messages.get("dialog.analysis.section"), row);
 
         GridBagConstraints fullWidth = new GridBagConstraints();
         fullWidth.gridx = 0;
@@ -127,16 +131,18 @@ public final class ImageInfoDialog {
         fullWidth.gridwidth = 2;
         fullWidth.anchor = GridBagConstraints.NORTHWEST;
         fullWidth.insets = new Insets(0, 0, 8, 0);
-        JLabel explanation = new JLabel("<html>Processa a imagem pixel a pixel; pode levar alguns segundos em"
-                + " imagens grandes, por isso só roda quando solicitado.</html>");
+        JLabel explanation = new JLabel("<html>" + Messages.get("dialog.analysis.explanation") + "</html>");
         section.add(explanation, fullWidth);
 
-        JCheckBox checkResolution = new JCheckBox("Verificar resolução para impressão em:");
+        JCheckBox checkResolution = new JCheckBox(Messages.get("dialog.analysis.checkResolution"));
         SpinnerNumberModel widthModel = new SpinnerNumberModel(10.0, 0.1, 1000.0, 0.5);
         JSpinner widthSpinner = new JSpinner(widthModel);
         SpinnerNumberModel heightModel = new SpinnerNumberModel(10.0, 0.1, 1000.0, 0.5);
         JSpinner heightSpinner = new JSpinner(heightModel);
-        JComboBox<String> unitCombo = new JComboBox<>(new String[] {"cm", "polegadas"});
+        // Index-based (0 = cm, 1 = inches) rather than comparing the localized
+        // label text, so the unit check works regardless of the active language.
+        JComboBox<String> unitCombo = new JComboBox<>(new String[] {
+                Messages.get("dialog.analysis.unit.cm"), Messages.get("dialog.analysis.unit.inches")});
         widthSpinner.setEnabled(false);
         heightSpinner.setEnabled(false);
         unitCombo.setEnabled(false);
@@ -160,7 +166,7 @@ public final class ImageInfoDialog {
         printSizeConstraints.anchor = GridBagConstraints.NORTHWEST;
         section.add(printSizeRow, printSizeConstraints);
 
-        JLabel minDpiLabel = new JLabel("DPI mínimo recomendado:");
+        JLabel minDpiLabel = new JLabel(Messages.get("dialog.analysis.minDpi"));
         SpinnerNumberModel minDpiModel = new SpinnerNumberModel(
                 AnalysisOptions.DEFAULT_MIN_RECOMMENDED_DPI, 72, 1200, 1);
         JSpinner minDpiSpinner = new JSpinner(minDpiModel);
@@ -175,7 +181,7 @@ public final class ImageInfoDialog {
         minDpiConstraints.insets = new Insets(0, 0, 8, 0);
         section.add(minDpiRow, minDpiConstraints);
 
-        JButton analyzeButton = new JButton("Analisar imagem");
+        JButton analyzeButton = new JButton(Messages.get("dialog.analysis.button"));
         JProgressBar progressBar = new JProgressBar(0, 100);
         progressBar.setStringPainted(true);
         progressBar.setVisible(false);
@@ -192,7 +198,7 @@ public final class ImageInfoDialog {
 
         JPanel resultsPanel = new JPanel();
         resultsPanel.setLayout(new BoxLayout(resultsPanel, BoxLayout.Y_AXIS));
-        resultsPanel.add(new JLabel("Nenhuma análise executada ainda."));
+        resultsPanel.add(new JLabel(Messages.get("dialog.analysis.noneYet")));
         GridBagConstraints resultsConstraints = new GridBagConstraints();
         resultsConstraints.gridx = 0;
         resultsConstraints.gridy = row;
@@ -216,7 +222,7 @@ public final class ImageInfoDialog {
         if (checkResolution.isSelected()) {
             double width = (Double) widthSpinner.getValue();
             double height = (Double) heightSpinner.getValue();
-            boolean isInches = "polegadas".equals(unitCombo.getSelectedItem());
+            boolean isInches = unitCombo.getSelectedIndex() == 1;
             printWidthCm = isInches ? width * 2.54 : width;
             printHeightCm = isInches ? height * 2.54 : height;
         }
@@ -249,8 +255,9 @@ public final class ImageInfoDialog {
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                 } catch (ExecutionException e) {
-                    JOptionPane.showMessageDialog(dialog, "Falha ao analisar a imagem: " + e.getCause().getMessage(),
-                            "Erro", JOptionPane.ERROR_MESSAGE);
+                    JOptionPane.showMessageDialog(dialog,
+                            Messages.get("dialog.analysis.error.message", e.getCause().getMessage()),
+                            Messages.get("dialog.analysis.error.title"), JOptionPane.ERROR_MESSAGE);
                 }
             }
         };
@@ -268,19 +275,22 @@ public final class ImageInfoDialog {
 
         JPanel textGrid = new JPanel(new GridBagLayout());
         int row = 0;
-        row = addRow(textGrid, "Cores únicas:", String.valueOf(result.uniqueColorCount()), row);
-        row = addRow(textGrid, "Canal alfa (transparência):", formatAlpha(result), row);
-        row = addRow(textGrid, "Cores fora do gamut CMYK:", formatGamut(result.gamutCheck()), row);
+        row = addRow(textGrid, Messages.get("dialog.analysis.result.uniqueColors"),
+                String.valueOf(result.uniqueColorCount()), row);
+        row = addRow(textGrid, Messages.get("dialog.analysis.result.alpha"), formatAlpha(result), row);
+        row = addRow(textGrid, Messages.get("dialog.analysis.result.gamut"), formatGamut(result.gamutCheck()), row);
         if (result.resolutionCheck() != null) {
-            row = addRow(textGrid, "Resolução para impressão:", formatResolutionCheck(result.resolutionCheck()), row);
+            row = addRow(textGrid, Messages.get("dialog.analysis.result.resolution"),
+                    formatResolutionCheck(result.resolutionCheck()), row);
         }
         if (result.estimatedJpegQuality() != null) {
-            row = addRow(textGrid, "Qualidade JPEG estimada:", result.estimatedJpegQuality() + "%", row);
+            row = addRow(textGrid, Messages.get("dialog.analysis.result.jpegQuality"),
+                    Messages.get("dialog.analysis.result.jpegQualityValue", result.estimatedJpegQuality()), row);
         }
-        addRow(textGrid, "Continuidade de borda:", formatEdgeContinuity(result.edgeContinuity()), row);
+        addRow(textGrid, Messages.get("dialog.analysis.result.continuity"), formatEdgeContinuity(result.edgeContinuity()), row);
         container.add(textGrid);
 
-        JLabel paletteLabel = new JLabel("Cores dominantes:");
+        JLabel paletteLabel = new JLabel(Messages.get("dialog.analysis.result.dominantColors"));
         paletteLabel.setBorder(BorderFactory.createEmptyBorder(10, 0, 4, 0));
         container.add(paletteLabel);
         container.add(buildDominantColorsRow(result.dominantColors()));
@@ -297,7 +307,8 @@ public final class ImageInfoDialog {
             swatch.setBorder(BorderFactory.createLineBorder(Color.GRAY));
 
             JLabel label = new JLabel("<html>" + color.toHex() + "<br>rgb(" + color.red() + "," + color.green()
-                    + "," + color.blue() + ")<br>" + String.format(PT_BR, "%.1f%%", color.percentOfImage()) + "</html>");
+                    + "," + color.blue() + ")<br>" + String.format(Messages.getLocale(), "%.1f%%", color.percentOfImage())
+                    + "</html>");
             label.setFont(label.getFont().deriveFont(11f));
 
             JPanel cell = new JPanel();
@@ -312,26 +323,26 @@ public final class ImageInfoDialog {
 
     private static String formatAlpha(AnalysisResult result) {
         if (!result.hasAlphaChannel()) {
-            return "Não";
+            return Messages.get("common.no");
         }
-        return String.format(PT_BR, "Sim (%.1f%% da imagem é transparente)", result.transparentPixelPercent());
+        return Messages.get("dialog.analysis.result.alphaYes", result.transparentPixelPercent());
     }
 
     private static String formatGamut(GamutCheckResult gamut) {
-        String status = gamut.hasSignificantOutOfGamut() ? "Sim" : "Não";
-        return String.format(PT_BR, "%s (%.1f%% dos pixels — estimativa aproximada, sem perfil ICC CMYK real)",
-                status, gamut.outOfGamutPixelPercent());
+        String status = gamut.hasSignificantOutOfGamut() ? Messages.get("common.yes") : Messages.get("common.no");
+        return Messages.get("dialog.analysis.result.gamutDetail", status, gamut.outOfGamutPixelPercent());
     }
 
     private static String formatResolutionCheck(ResolutionCheck check) {
-        String status = check.belowRecommended() ? "abaixo do recomendado" : "adequada";
-        return String.format(PT_BR, "%.1f x %.1f cm → %.0f x %.0f DPI (mínimo recomendado: %d DPI) — %s",
-                check.printWidthCm(), check.printHeightCm(), check.resultingHorizontalDpi(),
-                check.resultingVerticalDpi(), check.minRecommendedDpi(), status);
+        String status = check.belowRecommended()
+                ? Messages.get("dialog.analysis.result.resolutionBelow")
+                : Messages.get("dialog.analysis.result.resolutionOk");
+        return Messages.get("dialog.analysis.result.resolutionDetail", check.printWidthCm(), check.printHeightCm(),
+                check.resultingHorizontalDpi(), check.resultingVerticalDpi(), check.minRecommendedDpi(), status);
     }
 
     private static String formatEdgeContinuity(EdgeContinuityResult continuity) {
-        return String.format(PT_BR, "%s (score: %.1f)", continuity.level(), continuity.overallAverageDifference());
+        return Messages.get("dialog.analysis.result.continuityDetail", continuity.level(), continuity.overallAverageDifference());
     }
 
     private static int addSectionTitle(JPanel panel, String title, int row) {
@@ -369,7 +380,7 @@ public final class ImageInfoDialog {
     }
 
     private static String orDefault(String value) {
-        return orDefault(value, NOT_AVAILABLE);
+        return orDefault(value, Messages.get("common.notAvailable"));
     }
 
     private static String orDefault(String value, String fallback) {
@@ -378,43 +389,72 @@ public final class ImageInfoDialog {
 
     private static String formatFileSize(long bytes) {
         if (bytes < 1024) {
-            return bytes + " B";
+            return Messages.get("dialog.info.fileSize.bytes", bytes);
         }
         double kilobytes = bytes / 1024.0;
         if (kilobytes < 1024) {
-            return String.format(PT_BR, "%.1f KB", kilobytes);
+            return Messages.get("dialog.info.fileSize.kilobytes", kilobytes);
         }
-        return String.format(PT_BR, "%.2f MB", kilobytes / 1024.0);
+        return Messages.get("dialog.info.fileSize.megabytes", kilobytes / 1024.0);
     }
 
     private static String formatLastModified(ImageMetadata metadata) {
-        return LAST_MODIFIED_FORMAT.withZone(ZoneId.systemDefault()).format(metadata.lastModified());
+        return DateTimeFormatter.ofLocalizedDateTime(FormatStyle.SHORT)
+                .withLocale(Messages.getLocale())
+                .withZone(java.time.ZoneId.systemDefault())
+                .format(metadata.lastModified());
     }
 
     private static String formatDpi(ImageMetadata metadata) {
         if (!metadata.hasKnownDpi()) {
-            return NOT_AVAILABLE + " (arquivo não especifica DPI)";
+            return Messages.get("dialog.info.dimensions.resolutionUnknown", Messages.get("common.notAvailable"));
         }
-        return String.format(PT_BR, "%.0f x %.0f DPI", metadata.horizontalDpi(), metadata.verticalDpi());
+        return Messages.get("dialog.info.dimensions.resolutionKnown", metadata.horizontalDpi(), metadata.verticalDpi());
     }
 
     private static String formatPhysicalSize(ImageMetadata metadata) {
         String suffix = metadata.hasKnownDpi()
                 ? ""
-                : " (estimado, assumindo " + (int) metadata.assumedDpiForEstimate() + " DPI)";
-        return String.format(PT_BR, "%.1f x %.1f cm  /  %.2f x %.2f pol%s",
+                : Messages.get("dialog.info.dimensions.physicalSizeEstimatedSuffix", (int) metadata.assumedDpiForEstimate());
+        return Messages.get("dialog.info.dimensions.physicalSizeValue",
                 metadata.widthCm(), metadata.heightCm(), metadata.widthInches(), metadata.heightInches(), suffix);
     }
 
+    private static String formatColorMode(ImageMetadata metadata) {
+        ColorMode colorMode = metadata.colorMode();
+        if (colorMode == null) {
+            return Messages.get("common.notAvailable");
+        }
+        String base = Messages.get(switch (colorMode) {
+            case RGB -> "colorMode.rgb";
+            case GRAYSCALE -> "colorMode.grayscale";
+            case CMYK -> "colorMode.cmyk";
+            case INDEXED -> "colorMode.indexed";
+            case OTHER -> "colorMode.other";
+        });
+        return metadata.colorModeHasAlpha() ? base + " " + Messages.get("colorMode.alphaSuffix") : base;
+    }
+
     private static String formatBitDepth(Integer bitsPerChannel) {
-        return bitsPerChannel != null ? bitsPerChannel + " bits" : NOT_AVAILABLE;
+        return bitsPerChannel != null
+                ? Messages.get("dialog.info.color.bitDepthValue", bitsPerChannel)
+                : Messages.get("common.notAvailable");
+    }
+
+    private static String formatOrientation(Integer orientationCode) {
+        if (orientationCode == null) {
+            return Messages.get("common.notAvailable");
+        }
+        String key = "exif.orientation." + orientationCode;
+        String text = Messages.get(key);
+        return text.equals(key) ? Messages.get("common.notAvailable") : text;
     }
 
     private static String formatCameraSource(ExifInfo exif) {
         String make = exif.cameraMake();
         String model = exif.cameraModel();
         if (make == null && model == null) {
-            return NOT_AVAILABLE;
+            return Messages.get("common.notAvailable");
         }
         if (make == null) {
             return model;

@@ -1,22 +1,26 @@
 package com.anarapport.analysis;
 
+import com.anarapport.i18n.Messages;
+
 /**
  * Qualitative bucket for the edge-continuity score (how well the motif's
  * opposite edges would line up when tiled side by side).
  */
 public enum ContinuityLevel {
-    GOOD("Boa continuidade"),
-    ATTENTION("Atenção"),
-    HIGH_DISCONTINUITY("Descontinuidade alta");
+    GOOD("continuity.good"),
+    ATTENTION("continuity.attention"),
+    HIGH_DISCONTINUITY("continuity.highDiscontinuity");
 
-    private final String displayName;
+    private final String messageKey;
 
-    ContinuityLevel(String displayName) {
-        this.displayName = displayName;
+    ContinuityLevel(String messageKey) {
+        this.messageKey = messageKey;
     }
 
     @Override
     public String toString() {
-        return displayName;
+        // Resolved on every call (not cached) so it reflects the current
+        // language immediately after a runtime language switch.
+        return Messages.get(messageKey);
     }
 }

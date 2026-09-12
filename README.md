@@ -2,6 +2,8 @@
 
 Visualizador de rapport (repetição de padrão têxtil) em Java Swing. Carrega uma
 imagem e a exibe repetida em grade, com zoom, pan e três modos de repetição.
+A interface tem suporte a múltiplos idiomas (inglês por padrão; ver o menu
+**Idioma/Language** em "Uso" abaixo).
 
 ## Requisitos
 
@@ -20,6 +22,11 @@ O plugin `maven-shade-plugin` já empacota um jar executável autocontido em
 
 ## Uso
 
+- **Idioma/Language**: menu com um item por idioma suportado (Inglês, o
+  padrão, e Português por enquanto). Trocar o idioma atualiza a interface
+  inteira (menus, rótulos, diálogos) na hora, sem precisar reiniciar, e a
+  escolha fica salva (via `java.util.prefs.Preferences`) para a próxima vez
+  que o app abrir. Sem uma preferência salva, o app sempre abre em inglês.
 - **Arquivo → Abrir imagem**: carrega um PNG, JPEG, TIFF, BMP ou GIF como
   motivo do rapport (todo formato que o `ImageIO` do próprio JDK decodifica
   sem plugins extras). O painel de informações técnicas (perfil ICC, EXIF,
@@ -88,3 +95,8 @@ O plugin `maven-shade-plugin` já empacota um jar executável autocontido em
   avançada" (cores únicas/dominantes, transparência, gamut CMYK aproximado,
   continuidade de borda, checagem de resolução, qualidade JPEG estimada),
   reutilizados pela UI apenas para disparar a análise e exibir o resultado.
+- `i18n` — `Messages`, o carregador de textos localizados
+  (`src/main/resources/i18n/messages*.properties`) usado por toda a UI;
+  mantém o idioma atual e notifica quem quiser reconstruir a interface
+  quando ele muda. `RapportType`, `SeamStyle` e `ContinuityLevel` também
+  passam por aqui para resolver seu próprio texto de exibição.

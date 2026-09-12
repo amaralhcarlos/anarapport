@@ -1,5 +1,6 @@
 package com.anarapport.app;
 
+import com.anarapport.i18n.Messages;
 import com.anarapport.io.ImageExporter;
 import com.anarapport.io.ImageLoader;
 import com.anarapport.io.ImageMetadataReader;
@@ -23,6 +24,7 @@ import javax.swing.JMenuBar;
 import javax.swing.JMenuItem;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
+import javax.swing.JRadioButtonMenuItem;
 import javax.swing.JSpinner;
 import javax.swing.JToggleButton;
 import javax.swing.JToolBar;
@@ -31,19 +33,24 @@ import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
 import javax.swing.filechooser.FileNameExtensionFilter;
 import java.awt.BorderLayout;
+import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
 import java.util.EnumMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ExecutionException;
+import java.util.prefs.Preferences;
 
 /**
  * Application entry point.
  */
 public class Main {
+
+    private static final String PREFS_KEY_LANGUAGE = "language";
 
     public static void main(String[] args) {
         // Swing components must be created on the Event Dispatch Thread
@@ -51,6 +58,8 @@ public class Main {
     }
 
     private static void createAndShowGui() {
+        Messages.setLocale(loadSavedLocale());
+
         AppState appState = new AppState();
         ImagePanel imagePanel = new ImagePanel();
         imagePanel.setGridSize(appState.getGridSize());
@@ -60,8 +69,10 @@ public class Main {
         imagePanel.setCellOffsetXPercent(appState.getCellOffsetXPercent());
         imagePanel.setCellOffsetYPercent(appState.getCellOffsetYPercent());
 
+        // Rebuilt in place on every language switch; kept as the same Map
+        // instance so the property-change listener below (registered once)
+        // keeps working against whatever buttons currently exist.
         Map<RapportType, JToggleButton> rapportModeButtons = new EnumMap<>(RapportType.class);
-        JToolBar rapportModeToolBar = buildRapportModeToolBar(appState, rapportModeButtons);
 
         // Keep the panel (and toolbar selection) in sync with the model whenever it changes
         appState.addPropertyChangeListener(event -> {
@@ -70,7 +81,10 @@ public class Main {
                 case AppState.PROPERTY_GRID_SIZE -> imagePanel.setGridSize(appState.getGridSize());
                 case AppState.PROPERTY_RAPPORT_TYPE -> {
                     imagePanel.setRapportType(appState.getRapportType());
-                    rapportModeButtons.get(appState.getRapportType()).setSelected(true);
+                    JToggleButton button = rapportModeButtons.get(appState.getRapportType());
+                    if (button != null) {
+                        button.setSelected(true);
+                    }
                 }
                 case AppState.PROPERTY_SHOW_SEAMS -> imagePanel.setShowTileSeams(appState.isShowTileSeams());
                 case AppState.PROPERTY_SEAM_STYLE -> imagePanel.setSeamStyle(appState.getSeamStyle());
@@ -80,11 +94,7 @@ public class Main {
             }
         });
 
-        JPanel northPanel = new JPanel(new BorderLayout());
-        northPanel.add(rapportModeToolBar, BorderLayout.NORTH);
-        northPanel.add(buildControlsPanel(appState), BorderLayout.SOUTH);
-
-        JFrame frame = new JFrame("AnaRapport");
+        JFrame frame = new JFrame();
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         frame.setSize(800, 600);
         // Keeps the (multi-row) controls area from being squeezed into wrapping
@@ -93,10 +103,60 @@ public class Main {
         frame.setMinimumSize(new Dimension(720, 520));
         frame.setLocationRelativeTo(null);
         frame.setLayout(new BorderLayout());
-        frame.setJMenuBar(buildMenuBar(frame, appState, imagePanel));
-        frame.add(northPanel, BorderLayout.NORTH);
         frame.add(imagePanel, BorderLayout.CENTER);
+
+        Runnable rebuildChrome = () -> rebuildChrome(frame, appState, imagePanel, rapportModeButtons);
+        rebuildChrome.run();
+        // Menu-triggered, so this always runs on the EDT already; no invokeLater needed.
+        Messages.addChangeListener(rebuildChrome);
+
         frame.setVisible(true);
+    }
+
+    /**
+     * (Re)builds the frame's chrome -- title, menu bar, toolbar and controls
+     * panel -- so a live language switch can refresh every piece of text
+     * without touching {@code appState}/{@code imagePanel} (the loaded image,
+     * zoom/pan, grid size, offsets and seam settings are left untouched).
+     */
+    private static void rebuildChrome(JFrame frame, AppState appState, ImagePanel imagePanel,
+                                       Map<RapportType, JToggleButton> rapportModeButtons) {
+        frame.setTitle(Messages.get("app.title"));
+
+        rapportModeButtons.clear();
+        JToolBar rapportModeToolBar = buildRapportModeToolBar(appState, rapportModeButtons);
+
+        JPanel northPanel = new JPanel(new BorderLayout());
+        northPanel.add(rapportModeToolBar, BorderLayout.NORTH);
+        northPanel.add(buildControlsPanel(appState), BorderLayout.SOUTH);
+
+        BorderLayout layout = (BorderLayout) frame.getContentPane().getLayout();
+        Component oldNorth = layout.getLayoutComponent(BorderLayout.NORTH);
+        if (oldNorth != null) {
+            frame.remove(oldNorth);
+        }
+        frame.add(northPanel, BorderLayout.NORTH);
+
+        frame.setJMenuBar(buildMenuBar(frame, appState, imagePanel));
+
+        frame.revalidate();
+        frame.repaint();
+    }
+
+    private static Locale loadSavedLocale() {
+        String tag = Preferences.userNodeForPackage(Main.class).get(PREFS_KEY_LANGUAGE, null);
+        if (tag != null) {
+            for (Locale supported : Messages.getSupportedLocales()) {
+                if (supported.getLanguage().equals(tag)) {
+                    return supported;
+                }
+            }
+        }
+        return Locale.ENGLISH;
+    }
+
+    private static void saveLocalePreference(Locale locale) {
+        Preferences.userNodeForPackage(Main.class).put(PREFS_KEY_LANGUAGE, locale.getLanguage());
     }
 
     /**
@@ -123,33 +183,62 @@ public class Main {
     private static JMenuBar buildMenuBar(JFrame parentFrame, AppState appState, ImagePanel imagePanel) {
         JMenuBar menuBar = new JMenuBar();
 
-        JMenu fileMenu = new JMenu("Arquivo");
-        JMenuItem openImageItem = new JMenuItem("Abrir imagem");
+        JMenu fileMenu = new JMenu(Messages.get("menu.file"));
+        JMenuItem openImageItem = new JMenuItem(Messages.get("menu.file.open"));
         openImageItem.addActionListener(event -> openImage(parentFrame, appState, openImageItem));
         fileMenu.add(openImageItem);
 
         fileMenu.addSeparator();
 
-        JMenuItem exportCompositionItem = new JMenuItem("Exportar composição");
+        JMenuItem exportCompositionItem = new JMenuItem(Messages.get("menu.file.export"));
         exportCompositionItem.addActionListener(event -> exportComposition(parentFrame, imagePanel, exportCompositionItem));
         fileMenu.add(exportCompositionItem);
 
         menuBar.add(fileMenu);
 
-        JMenu imageMenu = new JMenu("Imagem");
-        JMenuItem imageInfoItem = new JMenuItem("Informações da imagem...");
+        JMenu imageMenu = new JMenu(Messages.get("menu.image"));
+        JMenuItem imageInfoItem = new JMenuItem(Messages.get("menu.image.info"));
         imageInfoItem.addActionListener(event -> showImageInfo(parentFrame, appState));
         imageMenu.add(imageInfoItem);
         menuBar.add(imageMenu);
 
+        menuBar.add(buildLanguageMenu());
+
         return menuBar;
+    }
+
+    private static JMenu buildLanguageMenu() {
+        JMenu languageMenu = new JMenu(Messages.get("menu.language"));
+        ButtonGroup group = new ButtonGroup();
+        for (Locale locale : Messages.getSupportedLocales()) {
+            JRadioButtonMenuItem item = new JRadioButtonMenuItem(languageDisplayName(locale));
+            item.setSelected(locale.equals(Messages.getLocale()));
+            item.addActionListener(event -> {
+                Messages.setLocale(locale);
+                saveLocalePreference(locale);
+            });
+            group.add(item);
+            languageMenu.add(item);
+        }
+        return languageMenu;
+    }
+
+    // Each language names itself, regardless of the currently active UI language.
+    private static String languageDisplayName(Locale locale) {
+        if (Locale.ENGLISH.equals(locale)) {
+            return "English";
+        }
+        if ("pt".equals(locale.getLanguage())) {
+            return "Português";
+        }
+        return locale.getDisplayName(locale);
     }
 
     private static void showImageInfo(JFrame parentFrame, AppState appState) {
         ImageMetadata metadata = appState.getImageMetadata();
         if (metadata == null) {
-            JOptionPane.showMessageDialog(parentFrame, "Carregue uma imagem antes de ver suas informações.",
-                    "Nenhuma imagem carregada", JOptionPane.WARNING_MESSAGE);
+            JOptionPane.showMessageDialog(parentFrame, Messages.get("dialog.noImage.message"),
+                    Messages.get("dialog.noImage.title"), JOptionPane.WARNING_MESSAGE);
             return;
         }
         ImageInfoDialog.show(parentFrame, metadata, appState.getImage());
@@ -168,19 +257,19 @@ public class Main {
         controlsPanel.setLayout(new BoxLayout(controlsPanel, BoxLayout.Y_AXIS));
         controlsPanel.setBorder(BorderFactory.createEmptyBorder(4, 8, 4, 8));
 
-        JLabel gridSizeLabel = new JLabel("Tamanho da grade:");
+        JLabel gridSizeLabel = new JLabel(Messages.get("control.gridSize"));
         SpinnerNumberModel gridSizeModel = new SpinnerNumberModel(
                 appState.getGridSize(), AppState.MIN_GRID_SIZE, AppState.MAX_GRID_SIZE, 1);
         JSpinner gridSizeSpinner = new JSpinner(gridSizeModel);
         gridSizeSpinner.addChangeListener(event -> appState.setGridSize((Integer) gridSizeSpinner.getValue()));
 
-        JLabel offsetXLabel = new JLabel("Offset horizontal (%):");
+        JLabel offsetXLabel = new JLabel(Messages.get("control.offsetX"));
         SpinnerNumberModel offsetXModel = new SpinnerNumberModel(appState.getCellOffsetXPercent(),
                 AppState.MIN_CELL_OFFSET_PERCENT, AppState.MAX_CELL_OFFSET_PERCENT, 1);
         JSpinner offsetXSpinner = new JSpinner(offsetXModel);
         offsetXSpinner.addChangeListener(event -> appState.setCellOffsetXPercent((Integer) offsetXSpinner.getValue()));
 
-        JLabel offsetYLabel = new JLabel("Offset vertical (%):");
+        JLabel offsetYLabel = new JLabel(Messages.get("control.offsetY"));
         SpinnerNumberModel offsetYModel = new SpinnerNumberModel(appState.getCellOffsetYPercent(),
                 AppState.MIN_CELL_OFFSET_PERCENT, AppState.MAX_CELL_OFFSET_PERCENT, 1);
         JSpinner offsetYSpinner = new JSpinner(offsetYModel);
@@ -194,7 +283,7 @@ public class Main {
         geometryRow.add(offsetYLabel);
         geometryRow.add(offsetYSpinner);
 
-        JCheckBox showSeamsCheckBox = new JCheckBox("Mostrar linhas de emenda", appState.isShowTileSeams());
+        JCheckBox showSeamsCheckBox = new JCheckBox(Messages.get("control.showSeams"), appState.isShowTileSeams());
         JComboBox<SeamStyle> seamStyleCombo = new JComboBox<>(SeamStyle.values());
         seamStyleCombo.setSelectedItem(appState.getSeamStyle());
         seamStyleCombo.setEnabled(appState.isShowTileSeams());
@@ -226,7 +315,7 @@ public class Main {
     private static void openImage(JFrame parentFrame, AppState appState, JMenuItem triggeringItem) {
         JFileChooser fileChooser = new JFileChooser();
         // Every format the JDK's own ImageIO can decode without extra plugins
-        fileChooser.setFileFilter(new FileNameExtensionFilter("Image files (PNG, JPEG, TIFF, BMP, GIF)",
+        fileChooser.setFileFilter(new FileNameExtensionFilter(Messages.get("fileChooser.openFilter"),
                 "png", "jpg", "jpeg", "tif", "tiff", "bmp", "gif"));
 
         int result = fileChooser.showOpenDialog(parentFrame);
@@ -254,8 +343,9 @@ public class Main {
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                 } catch (ExecutionException e) {
-                    JOptionPane.showMessageDialog(parentFrame, "Could not load image: " + e.getCause().getMessage(),
-                            "Error", JOptionPane.ERROR_MESSAGE);
+                    JOptionPane.showMessageDialog(parentFrame,
+                            Messages.get("error.loadImage", e.getCause().getMessage()),
+                            Messages.get("dialog.error.title"), JOptionPane.ERROR_MESSAGE);
                 }
             }
         }.execute();
@@ -273,13 +363,13 @@ public class Main {
     private static void exportComposition(JFrame parentFrame, ImagePanel imagePanel, JMenuItem triggeringItem) {
         ImagePanel.CompositionSnapshot snapshot = imagePanel.captureComposition();
         if (snapshot == null) {
-            JOptionPane.showMessageDialog(parentFrame, "Carregue uma imagem antes de exportar.",
-                    "Nada para exportar", JOptionPane.WARNING_MESSAGE);
+            JOptionPane.showMessageDialog(parentFrame, Messages.get("dialog.noComposition.message"),
+                    Messages.get("dialog.noComposition.title"), JOptionPane.WARNING_MESSAGE);
             return;
         }
 
-        FileNameExtensionFilter pngFilter = new FileNameExtensionFilter("PNG image (*.png)", "png");
-        FileNameExtensionFilter jpegFilter = new FileNameExtensionFilter("JPEG image (*.jpg, *.jpeg)", "jpg", "jpeg");
+        FileNameExtensionFilter pngFilter = new FileNameExtensionFilter(Messages.get("fileChooser.pngFilter"), "png");
+        FileNameExtensionFilter jpegFilter = new FileNameExtensionFilter(Messages.get("fileChooser.jpegFilter"), "jpg", "jpeg");
 
         JFileChooser fileChooser = new JFileChooser();
         fileChooser.addChoosableFileFilter(pngFilter);
@@ -310,8 +400,9 @@ public class Main {
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                 } catch (ExecutionException e) {
-                    JOptionPane.showMessageDialog(parentFrame, "Could not save image: " + e.getCause().getMessage(),
-                            "Error", JOptionPane.ERROR_MESSAGE);
+                    JOptionPane.showMessageDialog(parentFrame,
+                            Messages.get("error.saveImage", e.getCause().getMessage()),
+                            Messages.get("dialog.error.title"), JOptionPane.ERROR_MESSAGE);
                 }
             }
         }.execute();
