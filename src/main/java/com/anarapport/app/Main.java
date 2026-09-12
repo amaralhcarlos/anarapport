@@ -8,6 +8,7 @@ import com.anarapport.model.SeamStyle;
 import com.anarapport.ui.ImagePanel;
 
 import javax.swing.BorderFactory;
+import javax.swing.BoxLayout;
 import javax.swing.ButtonGroup;
 import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
@@ -27,6 +28,7 @@ import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
 import javax.swing.filechooser.FileNameExtensionFilter;
 import java.awt.BorderLayout;
+import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.image.BufferedImage;
 import java.io.File;
@@ -52,6 +54,8 @@ public class Main {
         imagePanel.setRapportType(appState.getRapportType());
         imagePanel.setShowTileSeams(appState.isShowTileSeams());
         imagePanel.setSeamStyle(appState.getSeamStyle());
+        imagePanel.setCellOffsetXPercent(appState.getCellOffsetXPercent());
+        imagePanel.setCellOffsetYPercent(appState.getCellOffsetYPercent());
 
         Map<RapportType, JToggleButton> rapportModeButtons = new EnumMap<>(RapportType.class);
         JToolBar rapportModeToolBar = buildRapportModeToolBar(appState, rapportModeButtons);
@@ -67,6 +71,8 @@ public class Main {
                 }
                 case AppState.PROPERTY_SHOW_SEAMS -> imagePanel.setShowTileSeams(appState.isShowTileSeams());
                 case AppState.PROPERTY_SEAM_STYLE -> imagePanel.setSeamStyle(appState.getSeamStyle());
+                case AppState.PROPERTY_CELL_OFFSET_X -> imagePanel.setCellOffsetXPercent(appState.getCellOffsetXPercent());
+                case AppState.PROPERTY_CELL_OFFSET_Y -> imagePanel.setCellOffsetYPercent(appState.getCellOffsetYPercent());
                 default -> { }
             }
         });
@@ -78,6 +84,10 @@ public class Main {
         JFrame frame = new JFrame("AnaRapport");
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         frame.setSize(800, 600);
+        // Keeps the (multi-row) controls area from being squeezed into wrapping
+        // rows taller than what a FlowLayout row reports as its preferred size,
+        // which would otherwise let the image panel overlap/hide the controls.
+        frame.setMinimumSize(new Dimension(720, 520));
         frame.setLocationRelativeTo(null);
         frame.setLayout(new BorderLayout());
         frame.setJMenuBar(buildMenuBar(frame, appState, imagePanel));
@@ -125,8 +135,17 @@ public class Main {
         return menuBar;
     }
 
+    /**
+     * Two explicit rows (grid/offset geometry, then the seam overlay) stacked
+     * vertically, rather than one long FlowLayout row. A single FlowLayout row
+     * with this many controls reports a one-row preferred height even when the
+     * window is too narrow and it actually wraps to two rows when laid out --
+     * that mismatch is what let the second row overlap/hide behind the image
+     * panel at the default (non-maximized) window size.
+     */
     private static JPanel buildControlsPanel(AppState appState) {
-        JPanel controlsPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        JPanel controlsPanel = new JPanel();
+        controlsPanel.setLayout(new BoxLayout(controlsPanel, BoxLayout.Y_AXIS));
         controlsPanel.setBorder(BorderFactory.createEmptyBorder(4, 8, 4, 8));
 
         JLabel gridSizeLabel = new JLabel("Tamanho da grade:");
@@ -134,6 +153,26 @@ public class Main {
                 appState.getGridSize(), AppState.MIN_GRID_SIZE, AppState.MAX_GRID_SIZE, 1);
         JSpinner gridSizeSpinner = new JSpinner(gridSizeModel);
         gridSizeSpinner.addChangeListener(event -> appState.setGridSize((Integer) gridSizeSpinner.getValue()));
+
+        JLabel offsetXLabel = new JLabel("Offset horizontal (%):");
+        SpinnerNumberModel offsetXModel = new SpinnerNumberModel(appState.getCellOffsetXPercent(),
+                AppState.MIN_CELL_OFFSET_PERCENT, AppState.MAX_CELL_OFFSET_PERCENT, 1);
+        JSpinner offsetXSpinner = new JSpinner(offsetXModel);
+        offsetXSpinner.addChangeListener(event -> appState.setCellOffsetXPercent((Integer) offsetXSpinner.getValue()));
+
+        JLabel offsetYLabel = new JLabel("Offset vertical (%):");
+        SpinnerNumberModel offsetYModel = new SpinnerNumberModel(appState.getCellOffsetYPercent(),
+                AppState.MIN_CELL_OFFSET_PERCENT, AppState.MAX_CELL_OFFSET_PERCENT, 1);
+        JSpinner offsetYSpinner = new JSpinner(offsetYModel);
+        offsetYSpinner.addChangeListener(event -> appState.setCellOffsetYPercent((Integer) offsetYSpinner.getValue()));
+
+        JPanel geometryRow = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        geometryRow.add(gridSizeLabel);
+        geometryRow.add(gridSizeSpinner);
+        geometryRow.add(offsetXLabel);
+        geometryRow.add(offsetXSpinner);
+        geometryRow.add(offsetYLabel);
+        geometryRow.add(offsetYSpinner);
 
         JCheckBox showSeamsCheckBox = new JCheckBox("Mostrar linhas de emenda", appState.isShowTileSeams());
         JComboBox<SeamStyle> seamStyleCombo = new JComboBox<>(SeamStyle.values());
@@ -148,10 +187,12 @@ public class Main {
         seamStyleCombo.addActionListener(event ->
                 appState.setSeamStyle((SeamStyle) seamStyleCombo.getSelectedItem()));
 
-        controlsPanel.add(gridSizeLabel);
-        controlsPanel.add(gridSizeSpinner);
-        controlsPanel.add(showSeamsCheckBox);
-        controlsPanel.add(seamStyleCombo);
+        JPanel seamRow = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        seamRow.add(showSeamsCheckBox);
+        seamRow.add(seamStyleCombo);
+
+        controlsPanel.add(geometryRow);
+        controlsPanel.add(seamRow);
         return controlsPanel;
     }
 
