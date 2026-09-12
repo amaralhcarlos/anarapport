@@ -28,6 +28,10 @@ O plugin `maven-shade-plugin` já empacota um jar executável autocontido em
 - **Mostrar linhas de emenda**: desenha uma linha sutil na borda de cada
   célula, com estilo selecionável (cinza escuro, branco, tracejada cinza ou
   vermelho de alto contraste), para localizar visualmente os pontos de emenda.
+- **Offset horizontal / vertical (%)**: afasta ou sobrepõe as células, em
+  percentual do tamanho do motivo (-50% a 100%, padrão 0% = encaixe perfeito).
+  Valores positivos abrem um gap visível entre réplicas; negativos simulam
+  leve sobreposição. Vale para os três modos de rapport.
 - **Zoom**: roda do mouse, centralizado no cursor.
 - **Pan**: arrastar com o botão esquerdo pressionado.
 - **Arquivo → Exportar composição**: renderiza exatamente o que está visível

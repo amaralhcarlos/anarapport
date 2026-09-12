@@ -33,6 +33,8 @@ public class ImagePanel extends JPanel {
     private RapportType rapportType;
     private boolean showTileSeams;
     private SeamStyle seamStyle;
+    private int cellOffsetXPercent;
+    private int cellOffsetYPercent;
 
     private double zoom = 1.0;
     private double panX = 0;
@@ -65,6 +67,16 @@ public class ImagePanel extends JPanel {
 
     public void setSeamStyle(SeamStyle seamStyle) {
         this.seamStyle = seamStyle;
+        repaint();
+    }
+
+    public void setCellOffsetXPercent(int cellOffsetXPercent) {
+        this.cellOffsetXPercent = cellOffsetXPercent;
+        repaint();
+    }
+
+    public void setCellOffsetYPercent(int cellOffsetYPercent) {
+        this.cellOffsetYPercent = cellOffsetYPercent;
         repaint();
     }
 
@@ -148,7 +160,7 @@ public class ImagePanel extends JPanel {
 
     private void paintContent(Graphics2D g2d) {
         renderer.render(g2d, image, getWidth(), getHeight(), gridSize, rapportType, currentViewTransform(),
-                showTileSeams, seamStyle);
+                showTileSeams, seamStyle, cellOffsetXPercent / 100.0, cellOffsetYPercent / 100.0);
     }
 
     private AffineTransform currentViewTransform() {
@@ -172,7 +184,8 @@ public class ImagePanel extends JPanel {
             return null;
         }
         return new CompositionSnapshot(image, width, height, gridSize, rapportType,
-                currentViewTransform(), showTileSeams, seamStyle);
+                currentViewTransform(), showTileSeams, seamStyle,
+                cellOffsetXPercent / 100.0, cellOffsetYPercent / 100.0);
     }
 
     /**
@@ -182,14 +195,15 @@ public class ImagePanel extends JPanel {
      */
     public record CompositionSnapshot(BufferedImage image, int width, int height, int gridSize,
                                        RapportType rapportType, AffineTransform viewTransform,
-                                       boolean showSeams, SeamStyle seamStyle) {
+                                       boolean showSeams, SeamStyle seamStyle,
+                                       double cellOffsetXFraction, double cellOffsetYFraction) {
 
         public BufferedImage render() {
             BufferedImage composition = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
             Graphics2D g2d = composition.createGraphics();
             try {
                 new RapportRenderer().render(g2d, image, width, height, gridSize, rapportType,
-                        viewTransform, showSeams, seamStyle);
+                        viewTransform, showSeams, seamStyle, cellOffsetXFraction, cellOffsetYFraction);
             } finally {
                 g2d.dispose();
             }

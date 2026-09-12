@@ -51,7 +51,8 @@ public class RapportRenderer {
      */
     public void render(Graphics2D g2d, BufferedImage image, int panelWidth, int panelHeight,
                         int gridSize, RapportType type, AffineTransform viewTransform,
-                        boolean showSeams, SeamStyle seamStyle) {
+                        boolean showSeams, SeamStyle seamStyle,
+                        double cellOffsetXFraction, double cellOffsetYFraction) {
         if (image == null || gridSize <= 0 || panelWidth <= 0 || panelHeight <= 0) {
             return;
         }
@@ -69,7 +70,8 @@ public class RapportRenderer {
 
             // Geometry (and the pre-scaled tile cache) is shared by every repeat
             // strategy below; only the placement/flip of each tile differs.
-            TileGeometry geometry = TileGeometry.of(image, panelWidth, panelHeight, gridSize);
+            TileGeometry geometry = TileGeometry.of(image, panelWidth, panelHeight, gridSize,
+                    cellOffsetXFraction, cellOffsetYFraction);
             refreshTileCache(image, geometry);
 
             switch (type) {
@@ -92,27 +94,28 @@ public class RapportRenderer {
 
         for (int row = range.rowStart(); row <= range.rowEnd(); row++) {
             for (int col = range.colStart(); col <= range.colEnd(); col++) {
-                drawTile(g2d, geometry, geometry.tileLeft(col), geometry.tileTop(row), showSeams);
+                drawTile(g2d, geometry, geometry.motifLeft(col), geometry.motifTop(row), showSeams);
             }
         }
     }
 
     /**
      * Half-drop repeat: same grid as the straight repeat, but odd columns are
-     * shifted down by half the motif's height, following the textile convention.
+     * shifted down by half the vertical pitch (motif height plus any vertical
+     * gap), following the textile convention.
      */
     private void renderHalfDrop(Graphics2D g2d, int panelWidth, int panelHeight,
                                  TileGeometry geometry, boolean showSeams) {
         // Extra row margin so the vertical offset never leaves a gap at the panel's edges
         TileRange range = computeTileRange(g2d, panelWidth, panelHeight, geometry, 2);
-        double halfTileHeight = geometry.tileHeight() / 2;
+        double halfPitchY = geometry.pitchY() / 2;
 
         for (int col = range.colStart(); col <= range.colEnd(); col++) {
-            double columnOffsetY = Math.floorMod(col, 2) == 0 ? 0 : halfTileHeight;
-            double x = geometry.tileLeft(col);
+            double columnOffsetY = Math.floorMod(col, 2) == 0 ? 0 : halfPitchY;
+            double x = geometry.motifLeft(col);
 
             for (int row = range.rowStart(); row <= range.rowEnd(); row++) {
-                drawTile(g2d, geometry, x, geometry.tileTop(row) + columnOffsetY, showSeams);
+                drawTile(g2d, geometry, x, geometry.motifTop(row) + columnOffsetY, showSeams);
             }
         }
     }
@@ -130,7 +133,7 @@ public class RapportRenderer {
             boolean flipVertical = Math.floorMod(row, 2) != 0;
             for (int col = range.colStart(); col <= range.colEnd(); col++) {
                 boolean flipHorizontal = Math.floorMod(col, 2) != 0;
-                drawTile(g2d, geometry, geometry.tileLeft(col), geometry.tileTop(row),
+                drawTile(g2d, geometry, geometry.motifLeft(col), geometry.motifTop(row),
                         flipHorizontal, flipVertical, showSeams);
             }
         }
@@ -144,27 +147,27 @@ public class RapportRenderer {
                            boolean flipHorizontal, boolean flipVertical, boolean showSeams) {
         BufferedImage tile = getCachedTile(flipHorizontal, flipVertical);
 
-        // The cached tile is already ~tileWidth x ~tileHeight, so this is a near
+        // The cached tile is already ~motifWidth x ~motifHeight, so this is a near
         // 1:1 blit rather than a resample of the (possibly much larger) source image
         AffineTransform tileTransform = new AffineTransform();
         tileTransform.translate(x, y);
-        tileTransform.scale(geometry.tileWidth() / tile.getWidth(), geometry.tileHeight() / tile.getHeight());
+        tileTransform.scale(geometry.motifWidth() / tile.getWidth(), geometry.motifHeight() / tile.getHeight());
         g2d.drawImage(tile, tileTransform, null);
 
         if (showSeams) {
-            g2d.draw(new Rectangle2D.Double(x, y, geometry.tileWidth(), geometry.tileHeight()));
+            g2d.draw(new Rectangle2D.Double(x, y, geometry.motifWidth(), geometry.motifHeight()));
         }
     }
 
     /**
-     * Ensures the tile cache matches the current source image and tile size,
+     * Ensures the tile cache matches the current source image and motif size,
      * clearing it whenever either changes (new image, grid size, or panel resize).
-     * Zooming/panning alone never changes tile size, since it is applied by the
-     * caller's view transform rather than by resizing the tiles themselves.
+     * Zooming/panning and the cell offset/gap never change the motif's own size
+     * (only its spacing), so neither invalidates the cache.
      */
     private void refreshTileCache(BufferedImage image, TileGeometry geometry) {
-        int tileWidthPx = Math.max(1, (int) Math.round(geometry.tileWidth()));
-        int tileHeightPx = Math.max(1, (int) Math.round(geometry.tileHeight()));
+        int tileWidthPx = Math.max(1, (int) Math.round(geometry.motifWidth()));
+        int tileHeightPx = Math.max(1, (int) Math.round(geometry.motifHeight()));
 
         if (image != cachedSourceImage || tileWidthPx != cachedTileWidthPx || tileHeightPx != cachedTileHeightPx) {
             tileCache.clear();
@@ -231,16 +234,17 @@ public class RapportRenderer {
     /**
      * Works out which tile row/column indices need to be drawn to cover the panel,
      * by mapping the panel's device-space rectangle back into tile-grid coordinates
-     * through the current graphics transform (i.e. the inverse of zoom/pan).
+     * through the current graphics transform (i.e. the inverse of zoom/pan). Uses
+     * the pitch (motif size plus gap), the real spacing between tile origins.
      */
     private TileRange computeTileRange(Graphics2D g2d, int panelWidth, int panelHeight,
                                         TileGeometry geometry, int marginTiles) {
         Rectangle2D visibleWorldBounds = computeVisibleWorldBounds(g2d, panelWidth, panelHeight);
 
-        int colStart = (int) Math.floor((visibleWorldBounds.getMinX() - geometry.centerX()) / geometry.tileWidth()) - marginTiles;
-        int colEnd = (int) Math.ceil((visibleWorldBounds.getMaxX() - geometry.centerX()) / geometry.tileWidth()) + marginTiles;
-        int rowStart = (int) Math.floor((visibleWorldBounds.getMinY() - geometry.centerY()) / geometry.tileHeight()) - marginTiles;
-        int rowEnd = (int) Math.ceil((visibleWorldBounds.getMaxY() - geometry.centerY()) / geometry.tileHeight()) + marginTiles;
+        int colStart = (int) Math.floor((visibleWorldBounds.getMinX() - geometry.centerX()) / geometry.pitchX()) - marginTiles;
+        int colEnd = (int) Math.ceil((visibleWorldBounds.getMaxX() - geometry.centerX()) / geometry.pitchX()) + marginTiles;
+        int rowStart = (int) Math.floor((visibleWorldBounds.getMinY() - geometry.centerY()) / geometry.pitchY()) - marginTiles;
+        int rowEnd = (int) Math.ceil((visibleWorldBounds.getMaxY() - geometry.centerY()) / geometry.pitchY()) + marginTiles;
 
         return new TileRange(colStart, colEnd, rowStart, rowEnd);
     }
@@ -261,23 +265,43 @@ public class RapportRenderer {
     }
 
     /**
-     * Tile size and panel-center reference shared by every repeat strategy.
-     * Tile width comes from gridSize; tile height follows the image's aspect ratio.
+     * Motif size, pitch (spacing between tile origins) and panel-center reference
+     * shared by every repeat strategy. Motif width comes from gridSize; motif
+     * height follows the image's aspect ratio. Pitch equals motif size plus the
+     * cell offset/gap: a positive offset spaces cells apart (visible gap/seam), a
+     * negative one overlaps them, while zero (the default) reproduces the old
+     * edge-to-edge tiling exactly (pitch == motif size).
      */
-    private record TileGeometry(double tileWidth, double tileHeight, double centerX, double centerY) {
+    private record TileGeometry(double motifWidth, double motifHeight, double pitchX, double pitchY,
+                                 double centerX, double centerY) {
 
-        static TileGeometry of(BufferedImage image, int panelWidth, int panelHeight, int gridSize) {
-            double tileWidth = (double) panelWidth / gridSize;
-            double tileHeight = tileWidth * image.getHeight() / image.getWidth();
-            return new TileGeometry(tileWidth, tileHeight, panelWidth / 2.0, panelHeight / 2.0);
+        static TileGeometry of(BufferedImage image, int panelWidth, int panelHeight, int gridSize,
+                                double cellOffsetXFraction, double cellOffsetYFraction) {
+            double motifWidth = (double) panelWidth / gridSize;
+            double motifHeight = motifWidth * image.getHeight() / image.getWidth();
+            double pitchX = motifWidth * (1 + cellOffsetXFraction);
+            double pitchY = motifHeight * (1 + cellOffsetYFraction);
+            return new TileGeometry(motifWidth, motifHeight, pitchX, pitchY, panelWidth / 2.0, panelHeight / 2.0);
         }
 
-        double tileLeft(int col) {
-            return centerX - tileWidth / 2 + col * tileWidth;
+        /** Left edge of the pitch "slot" a tile at this column occupies. */
+        private double cellLeft(int col) {
+            return centerX - pitchX / 2 + col * pitchX;
         }
 
-        double tileTop(int row) {
-            return centerY - tileHeight / 2 + row * tileHeight;
+        /** Top edge of the pitch "slot" a tile at this row occupies. */
+        private double cellTop(int row) {
+            return centerY - pitchY / 2 + row * pitchY;
+        }
+
+        /** Left edge of the motif itself, centered within its pitch slot. */
+        double motifLeft(int col) {
+            return cellLeft(col) + (pitchX - motifWidth) / 2;
+        }
+
+        /** Top edge of the motif itself, centered within its pitch slot. */
+        double motifTop(int row) {
+            return cellTop(row) + (pitchY - motifHeight) / 2;
         }
     }
 

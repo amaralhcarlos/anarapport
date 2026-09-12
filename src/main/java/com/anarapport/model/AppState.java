@@ -16,10 +16,18 @@ public class AppState {
     public static final String PROPERTY_RAPPORT_TYPE = "rapportType";
     public static final String PROPERTY_SHOW_SEAMS = "showTileSeams";
     public static final String PROPERTY_SEAM_STYLE = "seamStyle";
+    public static final String PROPERTY_CELL_OFFSET_X = "cellOffsetXPercent";
+    public static final String PROPERTY_CELL_OFFSET_Y = "cellOffsetYPercent";
 
     public static final int MIN_GRID_SIZE = 3;
     public static final int MAX_GRID_SIZE = 9;
     public static final int DEFAULT_GRID_SIZE = 3;
+
+    // Percent of the motif's own size: negative overlaps cells, positive spaces
+    // them apart, 0 (default) reproduces the original edge-to-edge tiling.
+    public static final int MIN_CELL_OFFSET_PERCENT = -50;
+    public static final int MAX_CELL_OFFSET_PERCENT = 100;
+    public static final int DEFAULT_CELL_OFFSET_PERCENT = 0;
 
     private final PropertyChangeSupport support = new PropertyChangeSupport(this);
     private BufferedImage image;
@@ -27,6 +35,8 @@ public class AppState {
     private RapportType rapportType = RapportType.STRAIGHT;
     private boolean showTileSeams = true;
     private SeamStyle seamStyle = SeamStyle.DARK_GRAY_SOLID;
+    private int cellOffsetXPercent = DEFAULT_CELL_OFFSET_PERCENT;
+    private int cellOffsetYPercent = DEFAULT_CELL_OFFSET_PERCENT;
 
     public BufferedImage getImage() {
         return image;
@@ -77,6 +87,32 @@ public class AppState {
         SeamStyle old = this.seamStyle;
         this.seamStyle = seamStyle;
         support.firePropertyChange(PROPERTY_SEAM_STYLE, old, seamStyle);
+    }
+
+    public int getCellOffsetXPercent() {
+        return cellOffsetXPercent;
+    }
+
+    public void setCellOffsetXPercent(int cellOffsetXPercent) {
+        int clamped = clampCellOffsetPercent(cellOffsetXPercent);
+        int old = this.cellOffsetXPercent;
+        this.cellOffsetXPercent = clamped;
+        support.firePropertyChange(PROPERTY_CELL_OFFSET_X, old, clamped);
+    }
+
+    public int getCellOffsetYPercent() {
+        return cellOffsetYPercent;
+    }
+
+    public void setCellOffsetYPercent(int cellOffsetYPercent) {
+        int clamped = clampCellOffsetPercent(cellOffsetYPercent);
+        int old = this.cellOffsetYPercent;
+        this.cellOffsetYPercent = clamped;
+        support.firePropertyChange(PROPERTY_CELL_OFFSET_Y, old, clamped);
+    }
+
+    private static int clampCellOffsetPercent(int percent) {
+        return Math.max(MIN_CELL_OFFSET_PERCENT, Math.min(MAX_CELL_OFFSET_PERCENT, percent));
     }
 
     public void addPropertyChangeListener(PropertyChangeListener listener) {
