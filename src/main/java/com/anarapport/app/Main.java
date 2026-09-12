@@ -225,7 +225,9 @@ public class Main {
      */
     private static void openImage(JFrame parentFrame, AppState appState, JMenuItem triggeringItem) {
         JFileChooser fileChooser = new JFileChooser();
-        fileChooser.setFileFilter(new FileNameExtensionFilter("Image files (PNG, JPEG)", "png", "jpg", "jpeg"));
+        // Every format the JDK's own ImageIO can decode without extra plugins
+        fileChooser.setFileFilter(new FileNameExtensionFilter("Image files (PNG, JPEG, TIFF, BMP, GIF)",
+                "png", "jpg", "jpeg", "tif", "tiff", "bmp", "gif"));
 
         int result = fileChooser.showOpenDialog(parentFrame);
         if (result != JFileChooser.APPROVE_OPTION) {

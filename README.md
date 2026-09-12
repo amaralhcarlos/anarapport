@@ -20,7 +20,12 @@ O plugin `maven-shade-plugin` já empacota um jar executável autocontido em
 
 ## Uso
 
-- **Arquivo → Abrir imagem**: carrega um PNG ou JPEG como motivo do rapport.
+- **Arquivo → Abrir imagem**: carrega um PNG, JPEG, TIFF, BMP ou GIF como
+  motivo do rapport (todo formato que o `ImageIO` do próprio JDK decodifica
+  sem plugins extras). O painel de informações técnicas (perfil ICC, EXIF,
+  qualidade JPEG) só extrai esses detalhes de PNG/JPEG hoje; nos demais
+  formatos, ou quando o dado simplesmente não está no arquivo, ele aparece
+  como "Não informado" em vez de falhar.
 - **Toolbar de modo**: alterna entre os três modos de repetição a qualquer
   momento, mantendo o zoom/pan atuais.
 - **Tamanho da grade**: controla quantas colunas do motivo cabem na largura
