@@ -7,6 +7,7 @@ import com.anarapport.model.SeamStyle;
 import com.anarapport.ui.ImagePanel;
 
 import javax.swing.BorderFactory;
+import javax.swing.ButtonGroup;
 import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JFileChooser;
@@ -18,6 +19,8 @@ import javax.swing.JMenuItem;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JSpinner;
+import javax.swing.JToggleButton;
+import javax.swing.JToolBar;
 import javax.swing.SpinnerNumberModel;
 import javax.swing.SwingUtilities;
 import javax.swing.filechooser.FileNameExtensionFilter;
@@ -26,6 +29,8 @@ import java.awt.FlowLayout;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
+import java.util.EnumMap;
+import java.util.Map;
 
 /**
  * Application entry point.
@@ -45,17 +50,27 @@ public class Main {
         imagePanel.setShowTileSeams(appState.isShowTileSeams());
         imagePanel.setSeamStyle(appState.getSeamStyle());
 
-        // Keep the panel in sync with the model whenever it changes
+        Map<RapportType, JToggleButton> rapportModeButtons = new EnumMap<>(RapportType.class);
+        JToolBar rapportModeToolBar = buildRapportModeToolBar(appState, rapportModeButtons);
+
+        // Keep the panel (and toolbar selection) in sync with the model whenever it changes
         appState.addPropertyChangeListener(event -> {
             switch (event.getPropertyName()) {
                 case AppState.PROPERTY_IMAGE -> imagePanel.setImage(appState.getImage());
                 case AppState.PROPERTY_GRID_SIZE -> imagePanel.setGridSize(appState.getGridSize());
-                case AppState.PROPERTY_RAPPORT_TYPE -> imagePanel.setRapportType(appState.getRapportType());
+                case AppState.PROPERTY_RAPPORT_TYPE -> {
+                    imagePanel.setRapportType(appState.getRapportType());
+                    rapportModeButtons.get(appState.getRapportType()).setSelected(true);
+                }
                 case AppState.PROPERTY_SHOW_SEAMS -> imagePanel.setShowTileSeams(appState.isShowTileSeams());
                 case AppState.PROPERTY_SEAM_STYLE -> imagePanel.setSeamStyle(appState.getSeamStyle());
                 default -> { }
             }
         });
+
+        JPanel northPanel = new JPanel(new BorderLayout());
+        northPanel.add(rapportModeToolBar, BorderLayout.NORTH);
+        northPanel.add(buildControlsPanel(appState), BorderLayout.SOUTH);
 
         JFrame frame = new JFrame("AnaRapport");
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
@@ -63,9 +78,30 @@ public class Main {
         frame.setLocationRelativeTo(null);
         frame.setLayout(new BorderLayout());
         frame.setJMenuBar(buildMenuBar(frame, appState));
-        frame.add(buildControlsPanel(appState), BorderLayout.NORTH);
+        frame.add(northPanel, BorderLayout.NORTH);
         frame.add(imagePanel, BorderLayout.CENTER);
         frame.setVisible(true);
+    }
+
+    /**
+     * Toolbar with one mutually-exclusive toggle button per RapportType, so the user
+     * can switch modes at any time. Switching only updates AppState.rapportType; the
+     * panel's current zoom/pan is untouched, so the grid redraws in place.
+     */
+    private static JToolBar buildRapportModeToolBar(AppState appState, Map<RapportType, JToggleButton> buttonsByType) {
+        JToolBar toolBar = new JToolBar();
+        toolBar.setFloatable(false);
+
+        ButtonGroup group = new ButtonGroup();
+        for (RapportType type : RapportType.values()) {
+            JToggleButton button = new JToggleButton(type.toString());
+            button.setSelected(type == appState.getRapportType());
+            button.addActionListener(event -> appState.setRapportType(type));
+            group.add(button);
+            toolBar.add(button);
+            buttonsByType.put(type, button);
+        }
+        return toolBar;
     }
 
     private static JMenuBar buildMenuBar(JFrame parentFrame, AppState appState) {
@@ -90,12 +126,6 @@ public class Main {
         JSpinner gridSizeSpinner = new JSpinner(gridSizeModel);
         gridSizeSpinner.addChangeListener(event -> appState.setGridSize((Integer) gridSizeSpinner.getValue()));
 
-        JLabel rapportTypeLabel = new JLabel("Modo de rapport:");
-        JComboBox<RapportType> rapportTypeCombo = new JComboBox<>(RapportType.values());
-        rapportTypeCombo.setSelectedItem(appState.getRapportType());
-        rapportTypeCombo.addActionListener(event ->
-                appState.setRapportType((RapportType) rapportTypeCombo.getSelectedItem()));
-
         JCheckBox showSeamsCheckBox = new JCheckBox("Mostrar separação entre réplicas", appState.isShowTileSeams());
         JComboBox<SeamStyle> seamStyleCombo = new JComboBox<>(SeamStyle.values());
         seamStyleCombo.setSelectedItem(appState.getSeamStyle());
@@ -111,8 +141,6 @@ public class Main {
 
         controlsPanel.add(gridSizeLabel);
         controlsPanel.add(gridSizeSpinner);
-        controlsPanel.add(rapportTypeLabel);
-        controlsPanel.add(rapportTypeCombo);
         controlsPanel.add(showSeamsCheckBox);
         controlsPanel.add(seamStyleCombo);
         return controlsPanel;
