@@ -44,7 +44,16 @@ O plugin `maven-shade-plugin` já empacota um jar executável autocontido em
   de bit, perfil ICC embutido, formato, tamanho em disco, caminho, data de
   modificação e metadados EXIF (câmera, data de captura, orientação), quando
   presentes. Campos não disponíveis no arquivo aparecem como "Não informado"
-  em vez de serem omitidos.
+  em vez de serem omitidos. A seção **Análise avançada**, ao final do
+  diálogo, só roda sob demanda (botão "Analisar imagem", com barra de
+  progresso via `SwingWorker`, já que envolve processar a imagem pixel a
+  pixel): contagem de cores únicas, presença/percentual de transparência,
+  aviso aproximado de cores fora do gamut CMYK, checagem de resolução para um
+  tamanho de impressão informado (cm ou polegadas, com DPI mínimo
+  configurável), qualidade estimada quando o arquivo é JPEG, paleta de cores
+  dominantes (com amostra visual e valor hex/RGB) e um score de continuidade
+  de borda (compara os pixels da borda esquerda/direita e superior/inferior,
+  simulando como ficariam ao repetir a imagem lado a lado).
 
 ## Modos de rapport
 
@@ -70,3 +79,7 @@ O plugin `maven-shade-plugin` já empacota um jar executável autocontido em
 - `io` — carregamento (`ImageLoader`), exportação (`ImageExporter`) e leitura
   de metadados técnicos (`ImageMetadataReader`, `ExifReader`) de imagens em
   disco.
+- `analysis` — `ImageAnalyzer`, os cálculos pixel a pixel da "Análise
+  avançada" (cores únicas/dominantes, transparência, gamut CMYK aproximado,
+  continuidade de borda, checagem de resolução, qualidade JPEG estimada),
+  reutilizados pela UI apenas para disparar a análise e exibir o resultado.

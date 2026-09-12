@@ -152,7 +152,7 @@ public class Main {
                     "Nenhuma imagem carregada", JOptionPane.WARNING_MESSAGE);
             return;
         }
-        ImageInfoDialog.show(parentFrame, metadata);
+        ImageInfoDialog.show(parentFrame, metadata, appState.getImage());
     }
 
     /**

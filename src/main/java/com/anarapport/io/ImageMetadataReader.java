@@ -8,6 +8,7 @@ import javax.imageio.ImageReader;
 import javax.imageio.ImageTypeSpecifier;
 import javax.imageio.metadata.IIOMetadata;
 import javax.imageio.metadata.IIOMetadataNode;
+import javax.imageio.plugins.jpeg.JPEGQTable;
 import javax.imageio.stream.ImageInputStream;
 import java.awt.color.ColorSpace;
 import java.awt.color.ICC_ColorSpace;
@@ -55,6 +56,69 @@ public final class ImageMetadataReader {
             } finally {
                 reader.dispose();
             }
+        }
+    }
+
+    /**
+     * Reads the luminance (qtableId=0) quantization table from a JPEG file, for
+     * estimating its encoding quality. Returns null for non-JPEG files or if the
+     * table isn't available. Used only by the on-demand "advanced analysis"
+     * feature, so this is a separate, lightweight metadata-only read rather than
+     * something {@link #read} always does.
+     */
+    public static int[] readJpegLuminanceQuantTable(File file) throws IOException {
+        try (ImageInputStream inputStream = ImageIO.createImageInputStream(file)) {
+            if (inputStream == null) {
+                return null;
+            }
+            Iterator<ImageReader> readers = ImageIO.getImageReaders(inputStream);
+            if (!readers.hasNext()) {
+                return null;
+            }
+
+            ImageReader reader = readers.next();
+            try {
+                reader.setInput(inputStream, true, false);
+                if (!"JPEG".equalsIgnoreCase(reader.getFormatName())) {
+                    return null;
+                }
+                return extractLuminanceQuantTable(safeImageMetadata(reader));
+            } finally {
+                reader.dispose();
+            }
+        }
+    }
+
+    private static int[] extractLuminanceQuantTable(IIOMetadata metadata) {
+        if (metadata == null || !supportsFormat(metadata, "javax_imageio_jpeg_image_1.0")) {
+            return null;
+        }
+        try {
+            Node markerSequence = findMarkerSequence(metadata);
+            if (markerSequence == null) {
+                return null;
+            }
+            // On read, each quantization table appears as its own <dqt><dqtable/></dqt>
+            // pair; qtableId="0" is the luminance table by JPEG convention.
+            NodeList dqtNodes = markerSequence.getChildNodes();
+            for (int i = 0; i < dqtNodes.getLength(); i++) {
+                Node dqt = dqtNodes.item(i);
+                if (!"dqt".equals(dqt.getNodeName())) {
+                    continue;
+                }
+                NodeList tables = dqt.getChildNodes();
+                for (int j = 0; j < tables.getLength(); j++) {
+                    Node table = tables.item(j);
+                    if (table instanceof IIOMetadataNode tableNode
+                            && "0".equals(tableNode.getAttribute("qtableId"))
+                            && tableNode.getUserObject() instanceof JPEGQTable quantTable) {
+                        return quantTable.getTable();
+                    }
+                }
+            }
+            return null;
+        } catch (RuntimeException e) {
+            return null;
         }
     }
 
