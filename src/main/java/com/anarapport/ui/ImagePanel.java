@@ -1,6 +1,7 @@
 package com.anarapport.ui;
 
 import com.anarapport.model.RapportType;
+import com.anarapport.model.SeamStyle;
 import com.anarapport.render.RapportRenderer;
 
 import javax.swing.JPanel;
@@ -30,6 +31,8 @@ public class ImagePanel extends JPanel {
     private BufferedImage image;
     private int gridSize;
     private RapportType rapportType;
+    private boolean showTileSeams;
+    private SeamStyle seamStyle;
 
     private double zoom = 1.0;
     private double panX = 0;
@@ -52,6 +55,16 @@ public class ImagePanel extends JPanel {
 
     public void setRapportType(RapportType rapportType) {
         this.rapportType = rapportType;
+        repaint();
+    }
+
+    public void setShowTileSeams(boolean showTileSeams) {
+        this.showTileSeams = showTileSeams;
+        repaint();
+    }
+
+    public void setSeamStyle(SeamStyle seamStyle) {
+        this.seamStyle = seamStyle;
         repaint();
     }
 
@@ -133,7 +146,8 @@ public class ImagePanel extends JPanel {
         // The renderer applies viewTransform to its own copy of g2d, so g stays
         // untransformed here for any overlay/UI drawing added after this call.
         Graphics2D g2d = (Graphics2D) g.create();
-        renderer.render(g2d, image, getWidth(), getHeight(), gridSize, rapportType, viewTransform);
+        renderer.render(g2d, image, getWidth(), getHeight(), gridSize, rapportType, viewTransform,
+                showTileSeams, seamStyle);
         g2d.dispose();
     }
 }

@@ -14,6 +14,8 @@ public class AppState {
     public static final String PROPERTY_IMAGE = "image";
     public static final String PROPERTY_GRID_SIZE = "gridSize";
     public static final String PROPERTY_RAPPORT_TYPE = "rapportType";
+    public static final String PROPERTY_SHOW_SEAMS = "showTileSeams";
+    public static final String PROPERTY_SEAM_STYLE = "seamStyle";
 
     public static final int MIN_GRID_SIZE = 3;
     public static final int MAX_GRID_SIZE = 9;
@@ -23,6 +25,8 @@ public class AppState {
     private BufferedImage image;
     private int gridSize = DEFAULT_GRID_SIZE;
     private RapportType rapportType = RapportType.STRAIGHT;
+    private boolean showTileSeams = true;
+    private SeamStyle seamStyle = SeamStyle.DARK_GRAY_SOLID;
 
     public BufferedImage getImage() {
         return image;
@@ -53,6 +57,26 @@ public class AppState {
         RapportType old = this.rapportType;
         this.rapportType = rapportType;
         support.firePropertyChange(PROPERTY_RAPPORT_TYPE, old, rapportType);
+    }
+
+    public boolean isShowTileSeams() {
+        return showTileSeams;
+    }
+
+    public void setShowTileSeams(boolean showTileSeams) {
+        boolean old = this.showTileSeams;
+        this.showTileSeams = showTileSeams;
+        support.firePropertyChange(PROPERTY_SHOW_SEAMS, old, showTileSeams);
+    }
+
+    public SeamStyle getSeamStyle() {
+        return seamStyle;
+    }
+
+    public void setSeamStyle(SeamStyle seamStyle) {
+        SeamStyle old = this.seamStyle;
+        this.seamStyle = seamStyle;
+        support.firePropertyChange(PROPERTY_SEAM_STYLE, old, seamStyle);
     }
 
     public void addPropertyChangeListener(PropertyChangeListener listener) {

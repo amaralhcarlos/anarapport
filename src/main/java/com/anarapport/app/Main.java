@@ -3,9 +3,11 @@ package com.anarapport.app;
 import com.anarapport.io.ImageLoader;
 import com.anarapport.model.AppState;
 import com.anarapport.model.RapportType;
+import com.anarapport.model.SeamStyle;
 import com.anarapport.ui.ImagePanel;
 
 import javax.swing.BorderFactory;
+import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JFileChooser;
 import javax.swing.JFrame;
@@ -40,6 +42,8 @@ public class Main {
         ImagePanel imagePanel = new ImagePanel();
         imagePanel.setGridSize(appState.getGridSize());
         imagePanel.setRapportType(appState.getRapportType());
+        imagePanel.setShowTileSeams(appState.isShowTileSeams());
+        imagePanel.setSeamStyle(appState.getSeamStyle());
 
         // Keep the panel in sync with the model whenever it changes
         appState.addPropertyChangeListener(event -> {
@@ -47,6 +51,8 @@ public class Main {
                 case AppState.PROPERTY_IMAGE -> imagePanel.setImage(appState.getImage());
                 case AppState.PROPERTY_GRID_SIZE -> imagePanel.setGridSize(appState.getGridSize());
                 case AppState.PROPERTY_RAPPORT_TYPE -> imagePanel.setRapportType(appState.getRapportType());
+                case AppState.PROPERTY_SHOW_SEAMS -> imagePanel.setShowTileSeams(appState.isShowTileSeams());
+                case AppState.PROPERTY_SEAM_STYLE -> imagePanel.setSeamStyle(appState.getSeamStyle());
                 default -> { }
             }
         });
@@ -90,10 +96,25 @@ public class Main {
         rapportTypeCombo.addActionListener(event ->
                 appState.setRapportType((RapportType) rapportTypeCombo.getSelectedItem()));
 
+        JCheckBox showSeamsCheckBox = new JCheckBox("Mostrar separação entre réplicas", appState.isShowTileSeams());
+        JComboBox<SeamStyle> seamStyleCombo = new JComboBox<>(SeamStyle.values());
+        seamStyleCombo.setSelectedItem(appState.getSeamStyle());
+        seamStyleCombo.setEnabled(appState.isShowTileSeams());
+
+        showSeamsCheckBox.addActionListener(event -> {
+            boolean selected = showSeamsCheckBox.isSelected();
+            appState.setShowTileSeams(selected);
+            seamStyleCombo.setEnabled(selected);
+        });
+        seamStyleCombo.addActionListener(event ->
+                appState.setSeamStyle((SeamStyle) seamStyleCombo.getSelectedItem()));
+
         controlsPanel.add(gridSizeLabel);
         controlsPanel.add(gridSizeSpinner);
         controlsPanel.add(rapportTypeLabel);
         controlsPanel.add(rapportTypeCombo);
+        controlsPanel.add(showSeamsCheckBox);
+        controlsPanel.add(seamStyleCombo);
         return controlsPanel;
     }
 

@@ -1,10 +1,14 @@
 package com.anarapport.render;
 
 import com.anarapport.model.RapportType;
+import com.anarapport.model.SeamStyle;
 
+import java.awt.BasicStroke;
+import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.Shape;
+import java.awt.Stroke;
 import java.awt.geom.AffineTransform;
 import java.awt.geom.NoninvertibleTransformException;
 import java.awt.geom.Rectangle2D;
@@ -17,6 +21,12 @@ import java.awt.image.BufferedImage;
  */
 public class RapportRenderer {
 
+    // Seams are kept at a constant on-screen width/dash length regardless of zoom
+    private static final double SEAM_WIDTH_PX = 1.0;
+    private static final double SEAM_DASH_LENGTH_PX = 4.0;
+    private static final double SEAM_DASH_GAP_PX = 4.0;
+    private static final int SEAM_ALPHA = 70;
+
     /**
      * Draws the pattern. The view transform (zoom/pan) is applied to a private copy
      * of the graphics context, so the caller's original Graphics2D is left untouched
@@ -24,7 +34,8 @@ public class RapportRenderer {
      * must not be affected by zoom/pan.
      */
     public void render(Graphics2D g2d, BufferedImage image, int panelWidth, int panelHeight,
-                        int gridSize, RapportType type, AffineTransform viewTransform) {
+                        int gridSize, RapportType type, AffineTransform viewTransform,
+                        boolean showSeams, SeamStyle seamStyle) {
         if (image == null || gridSize <= 0 || panelWidth <= 0 || panelHeight <= 0) {
             return;
         }
@@ -34,9 +45,15 @@ public class RapportRenderer {
             contentGraphics.transform(viewTransform);
             contentGraphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
 
+            if (showSeams) {
+                double zoomScale = viewTransform.getScaleX();
+                contentGraphics.setColor(seamColor(seamStyle));
+                contentGraphics.setStroke(seamStroke(seamStyle, zoomScale));
+            }
+
             switch (type) {
-                case STRAIGHT -> renderStraight(contentGraphics, image, panelWidth, panelHeight, gridSize);
-                case HALF_DROP -> renderHalfDrop(contentGraphics, image, panelWidth, panelHeight, gridSize);
+                case STRAIGHT -> renderStraight(contentGraphics, image, panelWidth, panelHeight, gridSize, showSeams);
+                case HALF_DROP -> renderHalfDrop(contentGraphics, image, panelWidth, panelHeight, gridSize, showSeams);
             }
         } finally {
             contentGraphics.dispose();
@@ -47,7 +64,8 @@ public class RapportRenderer {
      * Straight repeat: the source image is tiled on a plain grid, all rows and
      * columns aligned with no offset between them.
      */
-    private void renderStraight(Graphics2D g2d, BufferedImage image, int panelWidth, int panelHeight, int gridSize) {
+    private void renderStraight(Graphics2D g2d, BufferedImage image, int panelWidth, int panelHeight,
+                                 int gridSize, boolean showSeams) {
         TileGeometry geometry = TileGeometry.of(image, panelWidth, panelHeight, gridSize);
         TileRange range = computeTileRange(g2d, panelWidth, panelHeight, geometry, 1);
 
@@ -55,7 +73,7 @@ public class RapportRenderer {
             for (int col = range.colStart(); col <= range.colEnd(); col++) {
                 double x = geometry.tileLeft(col);
                 double y = geometry.tileTop(row);
-                drawTile(g2d, image, x, y, geometry);
+                drawTile(g2d, image, x, y, geometry, showSeams);
             }
         }
     }
@@ -64,7 +82,8 @@ public class RapportRenderer {
      * Half-drop repeat: same grid as the straight repeat, but odd columns are
      * shifted down by half the motif's height, following the textile convention.
      */
-    private void renderHalfDrop(Graphics2D g2d, BufferedImage image, int panelWidth, int panelHeight, int gridSize) {
+    private void renderHalfDrop(Graphics2D g2d, BufferedImage image, int panelWidth, int panelHeight,
+                                 int gridSize, boolean showSeams) {
         TileGeometry geometry = TileGeometry.of(image, panelWidth, panelHeight, gridSize);
         // Extra row margin so the vertical offset never leaves a gap at the panel's edges
         TileRange range = computeTileRange(g2d, panelWidth, panelHeight, geometry, 2);
@@ -77,16 +96,41 @@ public class RapportRenderer {
 
             for (int row = range.rowStart(); row <= range.rowEnd(); row++) {
                 double y = geometry.tileTop(row) + columnOffsetY;
-                drawTile(g2d, image, x, y, geometry);
+                drawTile(g2d, image, x, y, geometry, showSeams);
             }
         }
     }
 
-    private void drawTile(Graphics2D g2d, BufferedImage image, double x, double y, TileGeometry geometry) {
+    private void drawTile(Graphics2D g2d, BufferedImage image, double x, double y,
+                           TileGeometry geometry, boolean showSeams) {
         AffineTransform tileTransform = new AffineTransform();
         tileTransform.translate(x, y);
         tileTransform.scale(geometry.scaleX(), geometry.scaleY());
         g2d.drawImage(image, tileTransform, null);
+
+        if (showSeams) {
+            g2d.draw(new Rectangle2D.Double(x, y, geometry.tileWidth(), geometry.tileHeight()));
+        }
+    }
+
+    private Color seamColor(SeamStyle seamStyle) {
+        return switch (seamStyle) {
+            case DARK_GRAY_SOLID -> new Color(0, 0, 0, SEAM_ALPHA);
+            case WHITE_SOLID -> new Color(255, 255, 255, SEAM_ALPHA);
+            case GRAY_DASHED -> new Color(128, 128, 128, SEAM_ALPHA);
+        };
+    }
+
+    private Stroke seamStroke(SeamStyle seamStyle, double zoomScale) {
+        // Divide by the zoom scale so the seam keeps a constant apparent width/dash length on screen
+        float width = (float) (SEAM_WIDTH_PX / zoomScale);
+        if (seamStyle == SeamStyle.GRAY_DASHED) {
+            float dashLength = (float) (SEAM_DASH_LENGTH_PX / zoomScale);
+            float dashGap = (float) (SEAM_DASH_GAP_PX / zoomScale);
+            return new BasicStroke(width, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER,
+                    10f, new float[] {dashLength, dashGap}, 0f);
+        }
+        return new BasicStroke(width);
     }
 
     /**
