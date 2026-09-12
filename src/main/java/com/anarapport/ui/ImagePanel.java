@@ -139,15 +139,41 @@ public class ImagePanel extends JPanel {
             return;
         }
 
+        // The renderer applies the view transform to its own copy of g2d, so g stays
+        // untransformed here for any overlay/UI drawing added after this call.
+        Graphics2D g2d = (Graphics2D) g.create();
+        paintContent(g2d);
+        g2d.dispose();
+    }
+
+    /**
+     * Renders exactly what is currently visible on screen (same size, zoom and pan,
+     * rapport mode and seam overlay) into a standalone image, for exporting.
+     * Returns null if there is nothing to render yet.
+     */
+    public BufferedImage renderComposition() {
+        int width = getWidth();
+        int height = getHeight();
+        if (image == null || width <= 0 || height <= 0) {
+            return null;
+        }
+
+        BufferedImage composition = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g2d = composition.createGraphics();
+        try {
+            paintContent(g2d);
+        } finally {
+            g2d.dispose();
+        }
+        return composition;
+    }
+
+    private void paintContent(Graphics2D g2d) {
         AffineTransform viewTransform = new AffineTransform();
         viewTransform.translate(panX, panY);
         viewTransform.scale(zoom, zoom);
 
-        // The renderer applies viewTransform to its own copy of g2d, so g stays
-        // untransformed here for any overlay/UI drawing added after this call.
-        Graphics2D g2d = (Graphics2D) g.create();
         renderer.render(g2d, image, getWidth(), getHeight(), gridSize, rapportType, viewTransform,
                 showTileSeams, seamStyle);
-        g2d.dispose();
     }
 }

@@ -1,5 +1,6 @@
 package com.anarapport.app;
 
+import com.anarapport.io.ImageExporter;
 import com.anarapport.io.ImageLoader;
 import com.anarapport.model.AppState;
 import com.anarapport.model.RapportType;
@@ -77,7 +78,7 @@ public class Main {
         frame.setSize(800, 600);
         frame.setLocationRelativeTo(null);
         frame.setLayout(new BorderLayout());
-        frame.setJMenuBar(buildMenuBar(frame, appState));
+        frame.setJMenuBar(buildMenuBar(frame, appState, imagePanel));
         frame.add(northPanel, BorderLayout.NORTH);
         frame.add(imagePanel, BorderLayout.CENTER);
         frame.setVisible(true);
@@ -104,13 +105,19 @@ public class Main {
         return toolBar;
     }
 
-    private static JMenuBar buildMenuBar(JFrame parentFrame, AppState appState) {
+    private static JMenuBar buildMenuBar(JFrame parentFrame, AppState appState, ImagePanel imagePanel) {
         JMenuBar menuBar = new JMenuBar();
 
         JMenu fileMenu = new JMenu("Arquivo");
         JMenuItem openImageItem = new JMenuItem("Abrir imagem");
         openImageItem.addActionListener(event -> openImage(parentFrame, appState));
         fileMenu.add(openImageItem);
+
+        fileMenu.addSeparator();
+
+        JMenuItem exportCompositionItem = new JMenuItem("Exportar composição");
+        exportCompositionItem.addActionListener(event -> exportComposition(parentFrame, imagePanel));
+        fileMenu.add(exportCompositionItem);
 
         menuBar.add(fileMenu);
         return menuBar;
@@ -163,5 +170,44 @@ public class Main {
             JOptionPane.showMessageDialog(parentFrame, "Could not load image: " + ex.getMessage(),
                     "Error", JOptionPane.ERROR_MESSAGE);
         }
+    }
+
+    private static void exportComposition(JFrame parentFrame, ImagePanel imagePanel) {
+        BufferedImage composition = imagePanel.renderComposition();
+        if (composition == null) {
+            JOptionPane.showMessageDialog(parentFrame, "Carregue uma imagem antes de exportar.",
+                    "Nada para exportar", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+
+        FileNameExtensionFilter pngFilter = new FileNameExtensionFilter("PNG image (*.png)", "png");
+        FileNameExtensionFilter jpegFilter = new FileNameExtensionFilter("JPEG image (*.jpg, *.jpeg)", "jpg", "jpeg");
+
+        JFileChooser fileChooser = new JFileChooser();
+        fileChooser.addChoosableFileFilter(pngFilter);
+        fileChooser.addChoosableFileFilter(jpegFilter);
+        fileChooser.setFileFilter(pngFilter);
+
+        int result = fileChooser.showSaveDialog(parentFrame);
+        if (result != JFileChooser.APPROVE_OPTION) {
+            return;
+        }
+
+        String formatName = ((FileNameExtensionFilter) fileChooser.getFileFilter()).getExtensions()[0];
+        File targetFile = withExtension(fileChooser.getSelectedFile(), formatName);
+
+        try {
+            ImageExporter.save(composition, targetFile, formatName);
+        } catch (IOException ex) {
+            JOptionPane.showMessageDialog(parentFrame, "Could not save image: " + ex.getMessage(),
+                    "Error", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
+    private static File withExtension(File file, String extension) {
+        String lowerCaseName = file.getName().toLowerCase();
+        boolean alreadyHasExtension = lowerCaseName.endsWith("." + extension)
+                || ("jpg".equals(extension) && lowerCaseName.endsWith(".jpeg"));
+        return alreadyHasExtension ? file : new File(file.getParentFile(), file.getName() + "." + extension);
     }
 }
