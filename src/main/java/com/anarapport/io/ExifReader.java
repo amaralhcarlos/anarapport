@@ -39,7 +39,7 @@ final class ExifReader {
             int ifd0Offset = buffer.getInt(4);
             String make = null;
             String model = null;
-            String orientation = null;
+            Integer orientationCode = null;
             String dateTime = null;
             Integer exifIfdOffset = null;
 
@@ -55,7 +55,7 @@ final class ExifReader {
                     case TAG_MAKE -> make = readAscii(buffer, type, count, valueOffset);
                     case TAG_MODEL -> model = readAscii(buffer, type, count, valueOffset);
                     case TAG_DATETIME -> dateTime = readAscii(buffer, type, count, valueOffset);
-                    case TAG_ORIENTATION -> orientation = describeOrientation(readShort(buffer, type, valueOffset));
+                    case TAG_ORIENTATION -> orientationCode = readShort(buffer, type, valueOffset);
                     case TAG_EXIF_IFD_POINTER -> exifIfdOffset = buffer.getInt(valueOffset);
                     default -> { }
                 }
@@ -68,10 +68,10 @@ final class ExifReader {
             String captureDate = dateTimeOriginal != null ? dateTimeOriginal : dateTime;
             make = trimOrNull(make);
             model = trimOrNull(model);
-            if (make == null && model == null && captureDate == null && orientation == null) {
+            if (make == null && model == null && captureDate == null && orientationCode == null) {
                 return ExifInfo.EMPTY;
             }
-            return new ExifInfo(make, model, captureDate, orientation);
+            return new ExifInfo(make, model, captureDate, orientationCode);
         } catch (RuntimeException e) {
             // Any malformed/unexpected structure -> treat as "no EXIF" rather than propagate
             return ExifInfo.EMPTY;
@@ -109,20 +109,6 @@ final class ExifReader {
 
     private static int readShort(ByteBuffer buffer, int type, int valueOffset) {
         return type == TYPE_SHORT ? buffer.getShort(valueOffset) & 0xFFFF : 0;
-    }
-
-    private static String describeOrientation(int value) {
-        return switch (value) {
-            case 1 -> "Normal";
-            case 2 -> "Espelhada horizontalmente";
-            case 3 -> "Rotacionada 180°";
-            case 4 -> "Espelhada verticalmente";
-            case 5 -> "Espelhada horizontalmente e rotacionada 90° (anti-horário)";
-            case 6 -> "Rotacionada 90° (horário)";
-            case 7 -> "Espelhada horizontalmente e rotacionada 90° (horário)";
-            case 8 -> "Rotacionada 270° (horário)";
-            default -> null;
-        };
     }
 
     private static String trimOrNull(String value) {

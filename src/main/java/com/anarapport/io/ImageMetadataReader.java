@@ -1,5 +1,6 @@
 package com.anarapport.io;
 
+import com.anarapport.model.ColorMode;
 import com.anarapport.model.ExifInfo;
 import com.anarapport.model.ImageMetadata;
 
@@ -133,7 +134,8 @@ public final class ImageMetadataReader {
 
         ImageTypeSpecifier rawType = safeRawImageType(reader);
         ColorModel colorModel = rawType != null ? rawType.getColorModel() : null;
-        String colorMode = describeColorMode(colorModel);
+        ColorMode colorMode = describeColorMode(colorModel);
+        boolean colorModeHasAlpha = colorModel != null && colorModel.hasAlpha();
         Integer bitsPerChannel = describeBitDepth(colorModel);
 
         String iccProfileName = switch (format) {
@@ -145,7 +147,7 @@ public final class ImageMetadataReader {
         ExifInfo exif = "JPEG".equals(format) && metadata != null ? readExif(metadata) : ExifInfo.EMPTY;
 
         return new ImageMetadata(width, height, dpi.horizontal(), dpi.vertical(), ASSUMED_DPI,
-                colorMode, bitsPerChannel, iccProfileName, format, file.length(), file.getName(),
+                colorMode, colorModeHasAlpha, bitsPerChannel, iccProfileName, format, file.length(), file.getName(),
                 file.getAbsolutePath(), Instant.ofEpochMilli(file.lastModified()), exif);
     }
 
@@ -170,20 +172,19 @@ public final class ImageMetadataReader {
         }
     }
 
-    private static String describeColorMode(ColorModel colorModel) {
+    private static ColorMode describeColorMode(ColorModel colorModel) {
         if (colorModel == null) {
             return null;
         }
         if (colorModel instanceof IndexColorModel) {
-            return "Indexado (paleta)";
+            return ColorMode.INDEXED;
         }
-        String base = switch (colorModel.getColorSpace().getType()) {
-            case ColorSpace.TYPE_RGB -> "RGB";
-            case ColorSpace.TYPE_GRAY -> "Escala de cinza";
-            case ColorSpace.TYPE_CMYK -> "CMYK";
-            default -> "Outro";
+        return switch (colorModel.getColorSpace().getType()) {
+            case ColorSpace.TYPE_RGB -> ColorMode.RGB;
+            case ColorSpace.TYPE_GRAY -> ColorMode.GRAYSCALE;
+            case ColorSpace.TYPE_CMYK -> ColorMode.CMYK;
+            default -> ColorMode.OTHER;
         };
-        return colorModel.hasAlpha() ? base + " + Alpha" : base;
     }
 
     private static Integer describeBitDepth(ColorModel colorModel) {
