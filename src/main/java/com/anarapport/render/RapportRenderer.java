@@ -54,6 +54,7 @@ public class RapportRenderer {
             switch (type) {
                 case STRAIGHT -> renderStraight(contentGraphics, image, panelWidth, panelHeight, gridSize, showSeams);
                 case HALF_DROP -> renderHalfDrop(contentGraphics, image, panelWidth, panelHeight, gridSize, showSeams);
+                case MIRROR -> renderMirror(contentGraphics, image, panelWidth, panelHeight, gridSize, showSeams);
             }
         } finally {
             contentGraphics.dispose();
@@ -101,11 +102,44 @@ public class RapportRenderer {
         }
     }
 
+    /**
+     * Mirror repeat: cells alternate flip state by row/column parity (no flip,
+     * horizontal-only, vertical-only, or both — a checkerboard of orientations),
+     * so the motif mirrors continuously across every shared edge between neighbors.
+     */
+    private void renderMirror(Graphics2D g2d, BufferedImage image, int panelWidth, int panelHeight,
+                               int gridSize, boolean showSeams) {
+        TileGeometry geometry = TileGeometry.of(image, panelWidth, panelHeight, gridSize);
+        TileRange range = computeTileRange(g2d, panelWidth, panelHeight, geometry, 1);
+
+        for (int row = range.rowStart(); row <= range.rowEnd(); row++) {
+            boolean flipVertical = Math.floorMod(row, 2) != 0;
+            for (int col = range.colStart(); col <= range.colEnd(); col++) {
+                boolean flipHorizontal = Math.floorMod(col, 2) != 0;
+                double x = geometry.tileLeft(col);
+                double y = geometry.tileTop(row);
+                drawTile(g2d, image, x, y, geometry, flipHorizontal, flipVertical, showSeams);
+            }
+        }
+    }
+
     private void drawTile(Graphics2D g2d, BufferedImage image, double x, double y,
                            TileGeometry geometry, boolean showSeams) {
+        drawTile(g2d, image, x, y, geometry, false, false, showSeams);
+    }
+
+    private void drawTile(Graphics2D g2d, BufferedImage image, double x, double y, TileGeometry geometry,
+                           boolean flipHorizontal, boolean flipVertical, boolean showSeams) {
+        // Flipping is a negative scale anchored at the tile's far edge, so the
+        // mirrored image still exactly fills the same [x, x+tileWidth] x [y, y+tileHeight] rectangle
+        double originX = x + (flipHorizontal ? geometry.tileWidth() : 0);
+        double originY = y + (flipVertical ? geometry.tileHeight() : 0);
+        double scaleX = flipHorizontal ? -geometry.scaleX() : geometry.scaleX();
+        double scaleY = flipVertical ? -geometry.scaleY() : geometry.scaleY();
+
         AffineTransform tileTransform = new AffineTransform();
-        tileTransform.translate(x, y);
-        tileTransform.scale(geometry.scaleX(), geometry.scaleY());
+        tileTransform.translate(originX, originY);
+        tileTransform.scale(scaleX, scaleY);
         g2d.drawImage(image, tileTransform, null);
 
         if (showSeams) {

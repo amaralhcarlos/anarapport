@@ -7,7 +7,8 @@ package com.anarapport.model;
  */
 public enum RapportType {
     STRAIGHT("Reto"),
-    HALF_DROP("Half Drop");
+    HALF_DROP("Half Drop"),
+    MIRROR("Espelhado");
 
     private final String displayName;
 
