@@ -32,3 +32,47 @@ jobs:
         with:
           files: target/anarapport.jar
           generate_release_notes: true
+
+  build-windows-exe:
+    needs: build-and-release
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Build executable jar
+        run: mvn -B clean package
+
+      - name: Determine app version from tag
+        shell: bash
+        run: echo "APP_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+
+      - name: Package a self-contained Windows app with jpackage
+        shell: bash
+        run: |
+          mkdir input
+          cp target/anarapport.jar input/
+          jpackage \
+            --type app-image \
+            --input input \
+            --dest dist \
+            --name AnaRapport \
+            --main-jar anarapport.jar \
+            --main-class com.anarapport.app.Main \
+            --app-version "$APP_VERSION" \
+            --vendor "AnaRapport"
+
+      - name: Zip the app image
+        run: Compress-Archive -Path dist/AnaRapport -DestinationPath AnaRapport-windows.zip
+
+      - name: Upload the Windows build to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: AnaRapport-windows.zip
