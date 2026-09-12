@@ -1,90 +1,104 @@
 # AnaRapport
 
-Visualizador de rapport (repetição de padrão têxtil) em Java Swing. Carrega uma
-imagem e a exibe repetida em grade, com zoom, pan e três modos de repetição.
+A Java Swing viewer for textile "rapport" patterns (pattern repeats). Loads an
+image and previews it tiled across a grid, with zoom, pan, and three repeat
+modes — aimed at previewing and preparing a motif before handing it off to a
+tool like Photoshop for final production work.
 
-## Requisitos
+> The UI itself is in Portuguese (menu labels, buttons, dialogs); this README
+> documents it in English but keeps the literal on-screen label for each
+> feature so it's easy to find in the app.
+
+## Requirements
 
 - Java 17+
 - Maven 3.8+
 
-## Como rodar
+## Running it
 
 ```bash
 mvn clean package
 java -jar target/anarapport.jar
 ```
 
-O plugin `maven-shade-plugin` já empacota um jar executável autocontido em
-`target/anarapport.jar` (com o manifest apontando para `com.anarapport.app.Main`).
+The `maven-shade-plugin` packages a self-contained executable jar at
+`target/anarapport.jar` (manifest points to `com.anarapport.app.Main`).
 
-## Uso
+## Usage
 
-- **Arquivo → Abrir imagem**: carrega um PNG, JPEG, TIFF, BMP ou GIF como
-  motivo do rapport (todo formato que o `ImageIO` do próprio JDK decodifica
-  sem plugins extras). O painel de informações técnicas (perfil ICC, EXIF,
-  qualidade JPEG) só extrai esses detalhes de PNG/JPEG hoje; nos demais
-  formatos, ou quando o dado simplesmente não está no arquivo, ele aparece
-  como "Não informado" em vez de falhar.
-- **Toolbar de modo**: alterna entre os três modos de repetição a qualquer
-  momento, mantendo o zoom/pan atuais.
-- **Tamanho da grade**: controla quantas colunas do motivo cabem na largura
-  visível (3 a 9).
-- **Mostrar linhas de emenda**: desenha uma linha sutil na borda de cada
-  célula, com estilo selecionável (cinza escuro, branco, tracejada cinza ou
-  vermelho de alto contraste), para localizar visualmente os pontos de emenda.
-- **Offset horizontal / vertical (%)**: afasta ou sobrepõe as células, em
-  percentual do tamanho do motivo (-50% a 100%, padrão 0% = encaixe perfeito).
-  Valores positivos abrem um gap visível entre réplicas; negativos simulam
-  leve sobreposição. Vale para os três modos de rapport.
-- **Zoom**: roda do mouse, centralizado no cursor.
-- **Pan**: arrastar com o botão esquerdo pressionado.
-- **Arquivo → Exportar composição**: renderiza exatamente o que está visível
-  na tela (grade, modo de rapport e linhas de emenda, se ativadas) para um
-  PNG ou JPEG.
-- **Imagem → Informações da imagem...**: abre um diálogo com dados técnicos
-  do arquivo voltados para quem for retrabalhá-lo em outra ferramenta (ex.:
-  Photoshop) — dimensões em pixels, DPI (quando o arquivo
-  informa), tamanho físico estimado em cm/polegadas, modo de cor, profundidade
-  de bit, perfil ICC embutido, formato, tamanho em disco, caminho, data de
-  modificação e metadados EXIF (câmera, data de captura, orientação), quando
-  presentes. Campos não disponíveis no arquivo aparecem como "Não informado"
-  em vez de serem omitidos. A seção **Análise avançada**, ao final do
-  diálogo, só roda sob demanda (botão "Analisar imagem", com barra de
-  progresso via `SwingWorker`, já que envolve processar a imagem pixel a
-  pixel): contagem de cores únicas, presença/percentual de transparência,
-  aviso aproximado de cores fora do gamut CMYK, checagem de resolução para um
-  tamanho de impressão informado (cm ou polegadas, com DPI mínimo
-  configurável), qualidade estimada quando o arquivo é JPEG, paleta de cores
-  dominantes (com amostra visual e valor hex/RGB) e um score de continuidade
-  de borda (compara os pixels da borda esquerda/direita e superior/inferior,
-  simulando como ficariam ao repetir a imagem lado a lado).
+- **Arquivo → Abrir imagem** (File → Open image): loads a PNG, JPEG, TIFF,
+  BMP or GIF as the rapport motif — any format the JDK's own `ImageIO` can
+  decode without extra plugins. The technical info panel (ICC profile, EXIF,
+  JPEG quality) only extracts those specific details from PNG/JPEG today; for
+  other formats, or whenever a given piece of data simply isn't in the file,
+  it shows "Não informado" (Not available) instead of failing.
+- **Mode toolbar**: switches between the three repeat modes at any time,
+  keeping the current zoom/pan.
+- **Tamanho da grade** (Grid size): controls how many motif columns fit
+  across the visible width (3 to 9).
+- **Mostrar linhas de emenda** (Show seam lines): draws a subtle line along
+  each cell's border, with a selectable style (dark gray, white, dashed gray,
+  or high-contrast red), to help spot where each repeat starts and ends.
+- **Offset horizontal / vertical (%)**: pulls cells apart or overlaps them,
+  as a percentage of the motif's own size (-50% to 100%, default 0% = exact
+  edge-to-edge fit). Positive values open a visible gap between repeats;
+  negative values simulate a slight overlap. Works with all three rapport
+  modes.
+- **Zoom**: mouse wheel, centered on the cursor.
+- **Pan**: drag with the left mouse button held down.
+- **Arquivo → Exportar composição** (File → Export composition): renders
+  exactly what's currently visible on screen (grid, rapport mode, and seam
+  lines if enabled) to a PNG or JPEG file.
+- **Imagem → Informações da imagem...** (Image → Image information...):
+  opens a dialog with technical data about the file, aimed at someone who
+  will rework it in another tool (e.g. Photoshop) — pixel dimensions, DPI
+  (when the file specifies one), estimated physical size in cm/inches, color
+  mode, bit depth, embedded ICC profile, format, file size, path, last
+  modified date, and EXIF metadata (camera, capture date, orientation) when
+  present. Fields that aren't available in the file show "Não informado"
+  rather than being silently omitted. Its **Análise avançada** (Advanced
+  analysis) section only runs on demand ("Analisar imagem" button, with a
+  progress bar backed by a `SwingWorker`, since it processes the image pixel
+  by pixel):
+  - Unique color count.
+  - Alpha channel presence and percentage of transparent pixels.
+  - An approximate out-of-CMYK-gamut warning (a saturation/brightness
+    heuristic, since the JDK ships no CMYK ICC profile to convert against).
+  - A print-resolution check against a user-supplied print size (cm or
+    inches) and a configurable minimum recommended DPI.
+  - Estimated JPEG quality (derived from the file's actual quantization
+    table), when the file is a JPEG.
+  - Dominant color palette (top colors with a swatch and hex/RGB value).
+  - An edge-continuity score: compares the left/right and top/bottom borders
+    (as they'd meet when the motif is tiled side by side) and buckets the
+    result into "Boa continuidade" (good), "Atenção" (attention), or
+    "Descontinuidade alta" (high discontinuity).
 
-## Modos de rapport
+## Rapport modes
 
-- **Reto**: o motivo é repetido em uma grade simples, todas as linhas e
-  colunas alinhadas, sem nenhum deslocamento entre elas.
-- **Half Drop**: colunas alternadas são deslocadas verticalmente em metade da
-  altura do motivo, seguindo a convenção têxtil de meio-rapport.
-- **Espelhado**: cada célula alterna espelhamento horizontal, vertical ou nos
-  dois eixos conforme a paridade de linha/coluna (um padrão xadrez de
-  orientações), de forma que o motivo se reflete continuamente em toda borda
-  compartilhada entre células vizinhas.
+- **Reto** (Straight): the motif repeats on a plain grid, every row and
+  column aligned, with no offset between them.
+- **Half Drop**: alternating columns are shifted down by half the motif's
+  height, following the textile half-drop convention.
+- **Espelhado** (Mirrored): each cell alternates horizontal flip, vertical
+  flip, or both, based on its row/column parity (a checkerboard of
+  orientations), so the motif mirrors continuously across every edge shared
+  with a neighboring cell.
 
-## Estrutura do código
+## Code structure
 
-- `app` — ponto de entrada (`Main`) e montagem da interface.
-- `ui` — `ImagePanel`, o painel customizado que desenha a grade e trata
-  zoom/pan.
-- `render` — `RapportRenderer`, responsável pelo algoritmo de tiling de cada
-  modo de rapport (inclui um cache de tiles pré-escalados para manter o pan/
-  zoom fluido).
-- `model` — estado da aplicação (`AppState`), os enums `RapportType` e
-  `SeamStyle`, e os registros `ImageMetadata`/`ExifInfo`.
-- `io` — carregamento (`ImageLoader`), exportação (`ImageExporter`) e leitura
-  de metadados técnicos (`ImageMetadataReader`, `ExifReader`) de imagens em
-  disco.
-- `analysis` — `ImageAnalyzer`, os cálculos pixel a pixel da "Análise
-  avançada" (cores únicas/dominantes, transparência, gamut CMYK aproximado,
-  continuidade de borda, checagem de resolução, qualidade JPEG estimada),
-  reutilizados pela UI apenas para disparar a análise e exibir o resultado.
+- `app` — entry point (`Main`) and UI assembly.
+- `ui` — `ImagePanel` (the custom panel that draws the grid and handles
+  zoom/pan) and `ImageInfoDialog` (the technical info + advanced analysis
+  dialog).
+- `render` — `RapportRenderer`, the tiling algorithm for each rapport mode
+  (includes a cache of pre-scaled tile bitmaps to keep pan/zoom smooth).
+- `model` — application state (`AppState`), the `RapportType` and
+  `SeamStyle` enums, and the `ImageMetadata`/`ExifInfo` records.
+- `io` — loading (`ImageLoader`), exporting (`ImageExporter`), and technical
+  metadata extraction (`ImageMetadataReader`, `ExifReader`) for image files.
+- `analysis` — `ImageAnalyzer`, the pixel-level calculations behind
+  "Análise avançada" (unique/dominant colors, transparency, approximate CMYK
+  gamut, edge continuity, resolution check, estimated JPEG quality), reused
+  by the UI layer, which is only responsible for triggering the analysis and
+  displaying its result.
