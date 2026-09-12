@@ -26,6 +26,7 @@ public class RapportRenderer {
     private static final double SEAM_DASH_LENGTH_PX = 4.0;
     private static final double SEAM_DASH_GAP_PX = 4.0;
     private static final int SEAM_ALPHA = 70;
+    private static final int SEAM_ALPHA_HIGH_CONTRAST = 160;
 
     /**
      * Draws the pattern. The view transform (zoom/pan) is applied to a private copy
@@ -152,6 +153,7 @@ public class RapportRenderer {
             case DARK_GRAY_SOLID -> new Color(0, 0, 0, SEAM_ALPHA);
             case WHITE_SOLID -> new Color(255, 255, 255, SEAM_ALPHA);
             case GRAY_DASHED -> new Color(128, 128, 128, SEAM_ALPHA);
+            case RED_HIGH_CONTRAST -> new Color(255, 0, 0, SEAM_ALPHA_HIGH_CONTRAST);
         };
     }
 

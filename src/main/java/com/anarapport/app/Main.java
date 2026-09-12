@@ -126,7 +126,7 @@ public class Main {
         JSpinner gridSizeSpinner = new JSpinner(gridSizeModel);
         gridSizeSpinner.addChangeListener(event -> appState.setGridSize((Integer) gridSizeSpinner.getValue()));
 
-        JCheckBox showSeamsCheckBox = new JCheckBox("Mostrar separação entre réplicas", appState.isShowTileSeams());
+        JCheckBox showSeamsCheckBox = new JCheckBox("Mostrar linhas de emenda", appState.isShowTileSeams());
         JComboBox<SeamStyle> seamStyleCombo = new JComboBox<>(SeamStyle.values());
         seamStyleCombo.setSelectedItem(appState.getSeamStyle());
         seamStyleCombo.setEnabled(appState.isShowTileSeams());

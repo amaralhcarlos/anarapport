@@ -6,7 +6,8 @@ package com.anarapport.model;
 public enum SeamStyle {
     DARK_GRAY_SOLID("Cinza escuro"),
     WHITE_SOLID("Branco"),
-    GRAY_DASHED("Tracejada cinza");
+    GRAY_DASHED("Tracejada cinza"),
+    RED_HIGH_CONTRAST("Vermelho (alto contraste)");
 
     private final String displayName;
 
