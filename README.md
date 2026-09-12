@@ -8,18 +8,27 @@ languages (English by default; see **Language** under Usage below).
 
 ## Requirements
 
-- Java 17+
+- Java 17+ (only needed to build/run from source; not needed for the Windows download below)
 - Maven 3.8+
 
-## Running it
+## Getting it
 
-```bash
-mvn clean package
-java -jar target/anarapport.jar
-```
+- **Windows, no Java required**: grab `AnaRapport-windows.zip` from the
+  [latest release](https://github.com/amaralhcarlos/anarapport/releases/latest),
+  unzip it, and run `AnaRapport.exe` — it bundles its own Java runtime
+  (built with `jpackage`).
+- **Any platform, with Java installed**: grab `anarapport.jar` from the same
+  release and run `java -jar anarapport.jar`.
+- **From source**:
+  ```bash
+  mvn clean package
+  java -jar target/anarapport.jar
+  ```
+  The `maven-shade-plugin` packages a self-contained executable jar at
+  `target/anarapport.jar` (manifest points to `com.anarapport.app.Main`).
 
-The `maven-shade-plugin` packages a self-contained executable jar at
-`target/anarapport.jar` (manifest points to `com.anarapport.app.Main`).
+Pushing a `vX.Y.Z` tag triggers `.github/workflows/release.yml`, which builds
+both of the above and attaches them to a new GitHub Release.
 
 ## Usage
 
