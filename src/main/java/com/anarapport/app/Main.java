@@ -24,6 +24,7 @@ import javax.swing.JToggleButton;
 import javax.swing.JToolBar;
 import javax.swing.SpinnerNumberModel;
 import javax.swing.SwingUtilities;
+import javax.swing.SwingWorker;
 import javax.swing.filechooser.FileNameExtensionFilter;
 import java.awt.BorderLayout;
 import java.awt.FlowLayout;
@@ -32,6 +33,7 @@ import java.io.File;
 import java.io.IOException;
 import java.util.EnumMap;
 import java.util.Map;
+import java.util.concurrent.ExecutionException;
 
 /**
  * Application entry point.
@@ -110,13 +112,13 @@ public class Main {
 
         JMenu fileMenu = new JMenu("Arquivo");
         JMenuItem openImageItem = new JMenuItem("Abrir imagem");
-        openImageItem.addActionListener(event -> openImage(parentFrame, appState));
+        openImageItem.addActionListener(event -> openImage(parentFrame, appState, openImageItem));
         fileMenu.add(openImageItem);
 
         fileMenu.addSeparator();
 
         JMenuItem exportCompositionItem = new JMenuItem("Exportar composição");
-        exportCompositionItem.addActionListener(event -> exportComposition(parentFrame, imagePanel));
+        exportCompositionItem.addActionListener(event -> exportComposition(parentFrame, imagePanel, exportCompositionItem));
         fileMenu.add(exportCompositionItem);
 
         menuBar.add(fileMenu);
@@ -153,7 +155,12 @@ public class Main {
         return controlsPanel;
     }
 
-    private static void openImage(JFrame parentFrame, AppState appState) {
+    /**
+     * Loading decodes an image file (disk I/O + decoding), which can take a
+     * noticeable while for large files, so it runs off the EDT in a SwingWorker;
+     * only the file chooser and the final AppState update happen on the EDT.
+     */
+    private static void openImage(JFrame parentFrame, AppState appState, JMenuItem triggeringItem) {
         JFileChooser fileChooser = new JFileChooser();
         fileChooser.setFileFilter(new FileNameExtensionFilter("Image files (PNG, JPEG)", "png", "jpg", "jpeg"));
 
@@ -163,18 +170,37 @@ public class Main {
         }
 
         File selectedFile = fileChooser.getSelectedFile();
-        try {
-            BufferedImage image = ImageLoader.load(selectedFile);
-            appState.setImage(image);
-        } catch (IOException ex) {
-            JOptionPane.showMessageDialog(parentFrame, "Could not load image: " + ex.getMessage(),
-                    "Error", JOptionPane.ERROR_MESSAGE);
-        }
+        triggeringItem.setEnabled(false);
+        new SwingWorker<BufferedImage, Void>() {
+            @Override
+            protected BufferedImage doInBackground() throws IOException {
+                return ImageLoader.load(selectedFile);
+            }
+
+            @Override
+            protected void done() {
+                triggeringItem.setEnabled(true);
+                try {
+                    appState.setImage(get());
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                } catch (ExecutionException e) {
+                    JOptionPane.showMessageDialog(parentFrame, "Could not load image: " + e.getCause().getMessage(),
+                            "Error", JOptionPane.ERROR_MESSAGE);
+                }
+            }
+        }.execute();
     }
 
-    private static void exportComposition(JFrame parentFrame, ImagePanel imagePanel) {
-        BufferedImage composition = imagePanel.renderComposition();
-        if (composition == null) {
+    /**
+     * Rendering the composition (potentially many tile draws) and encoding/writing
+     * it to disk are both CPU/IO-heavy, so they run off the EDT in a SwingWorker.
+     * The snapshot is captured synchronously on the EDT first, so the background
+     * thread never touches ImagePanel's fields directly.
+     */
+    private static void exportComposition(JFrame parentFrame, ImagePanel imagePanel, JMenuItem triggeringItem) {
+        ImagePanel.CompositionSnapshot snapshot = imagePanel.captureComposition();
+        if (snapshot == null) {
             JOptionPane.showMessageDialog(parentFrame, "Carregue uma imagem antes de exportar.",
                     "Nada para exportar", JOptionPane.WARNING_MESSAGE);
             return;
@@ -196,12 +222,27 @@ public class Main {
         String formatName = ((FileNameExtensionFilter) fileChooser.getFileFilter()).getExtensions()[0];
         File targetFile = withExtension(fileChooser.getSelectedFile(), formatName);
 
-        try {
-            ImageExporter.save(composition, targetFile, formatName);
-        } catch (IOException ex) {
-            JOptionPane.showMessageDialog(parentFrame, "Could not save image: " + ex.getMessage(),
-                    "Error", JOptionPane.ERROR_MESSAGE);
-        }
+        triggeringItem.setEnabled(false);
+        new SwingWorker<Void, Void>() {
+            @Override
+            protected Void doInBackground() throws IOException {
+                ImageExporter.save(snapshot.render(), targetFile, formatName);
+                return null;
+            }
+
+            @Override
+            protected void done() {
+                triggeringItem.setEnabled(true);
+                try {
+                    get();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                } catch (ExecutionException e) {
+                    JOptionPane.showMessageDialog(parentFrame, "Could not save image: " + e.getCause().getMessage(),
+                            "Error", JOptionPane.ERROR_MESSAGE);
+                }
+            }
+        }.execute();
     }
 
     private static File withExtension(File file, String extension) {

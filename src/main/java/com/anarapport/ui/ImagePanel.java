@@ -146,34 +146,54 @@ public class ImagePanel extends JPanel {
         g2d.dispose();
     }
 
+    private void paintContent(Graphics2D g2d) {
+        renderer.render(g2d, image, getWidth(), getHeight(), gridSize, rapportType, currentViewTransform(),
+                showTileSeams, seamStyle);
+    }
+
+    private AffineTransform currentViewTransform() {
+        AffineTransform viewTransform = new AffineTransform();
+        viewTransform.translate(panX, panY);
+        viewTransform.scale(zoom, zoom);
+        return viewTransform;
+    }
+
     /**
-     * Renders exactly what is currently visible on screen (same size, zoom and pan,
-     * rapport mode and seam overlay) into a standalone image, for exporting.
+     * Captures exactly what is currently visible on screen (same size, zoom and
+     * pan, rapport mode and seam overlay) as an immutable snapshot, which can then
+     * be rendered off the Event Dispatch Thread (e.g. for exporting) without
+     * touching this panel's fields from another thread. Must be called on the EDT.
      * Returns null if there is nothing to render yet.
      */
-    public BufferedImage renderComposition() {
+    public CompositionSnapshot captureComposition() {
         int width = getWidth();
         int height = getHeight();
         if (image == null || width <= 0 || height <= 0) {
             return null;
         }
-
-        BufferedImage composition = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
-        Graphics2D g2d = composition.createGraphics();
-        try {
-            paintContent(g2d);
-        } finally {
-            g2d.dispose();
-        }
-        return composition;
+        return new CompositionSnapshot(image, width, height, gridSize, rapportType,
+                currentViewTransform(), showTileSeams, seamStyle);
     }
 
-    private void paintContent(Graphics2D g2d) {
-        AffineTransform viewTransform = new AffineTransform();
-        viewTransform.translate(panX, panY);
-        viewTransform.scale(zoom, zoom);
+    /**
+     * Immutable description of everything needed to reproduce the current view as a
+     * standalone image. Safe to hand off to a background thread: rendering it uses
+     * its own RapportRenderer instance, never the panel's shared one.
+     */
+    public record CompositionSnapshot(BufferedImage image, int width, int height, int gridSize,
+                                       RapportType rapportType, AffineTransform viewTransform,
+                                       boolean showSeams, SeamStyle seamStyle) {
 
-        renderer.render(g2d, image, getWidth(), getHeight(), gridSize, rapportType, viewTransform,
-                showTileSeams, seamStyle);
+        public BufferedImage render() {
+            BufferedImage composition = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+            Graphics2D g2d = composition.createGraphics();
+            try {
+                new RapportRenderer().render(g2d, image, width, height, gridSize, rapportType,
+                        viewTransform, showSeams, seamStyle);
+            } finally {
+                g2d.dispose();
+            }
+            return composition;
+        }
     }
 }

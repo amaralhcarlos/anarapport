@@ -13,11 +13,18 @@ import java.awt.geom.AffineTransform;
 import java.awt.geom.NoninvertibleTransformException;
 import java.awt.geom.Rectangle2D;
 import java.awt.image.BufferedImage;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * Renders the repeating rapport pattern for a source image onto a graphics context.
  * The layout strategy depends on the given RapportType, so new repeat styles
- * (brick, mirror, etc.) can be added later without changing callers.
+ * (brick, etc.) can be added later without changing callers.
+ *
+ * <p>Not thread-safe: each instance caches tile bitmaps pre-scaled to the current
+ * tile size, keyed by source image and size, so a given instance must only be
+ * driven from one thread at a time. The interactive view and a background export
+ * should each use their own instance.
  */
 public class RapportRenderer {
 
@@ -27,6 +34,14 @@ public class RapportRenderer {
     private static final double SEAM_DASH_GAP_PX = 4.0;
     private static final int SEAM_ALPHA = 70;
     private static final int SEAM_ALPHA_HIGH_CONTRAST = 160;
+
+    // Cache of tile bitmaps pre-scaled (and, for mirror mode, pre-flipped) to the
+    // current tile size, so panning/zooming doesn't re-resample the source image
+    // (which may be far larger than the on-screen tile) on every single repaint.
+    private BufferedImage cachedSourceImage;
+    private int cachedTileWidthPx = -1;
+    private int cachedTileHeightPx = -1;
+    private final Map<FlipKey, BufferedImage> tileCache = new HashMap<>();
 
     /**
      * Draws the pattern. The view transform (zoom/pan) is applied to a private copy
@@ -52,10 +67,15 @@ public class RapportRenderer {
                 contentGraphics.setStroke(seamStroke(seamStyle, zoomScale));
             }
 
+            // Geometry (and the pre-scaled tile cache) is shared by every repeat
+            // strategy below; only the placement/flip of each tile differs.
+            TileGeometry geometry = TileGeometry.of(image, panelWidth, panelHeight, gridSize);
+            refreshTileCache(image, geometry);
+
             switch (type) {
-                case STRAIGHT -> renderStraight(contentGraphics, image, panelWidth, panelHeight, gridSize, showSeams);
-                case HALF_DROP -> renderHalfDrop(contentGraphics, image, panelWidth, panelHeight, gridSize, showSeams);
-                case MIRROR -> renderMirror(contentGraphics, image, panelWidth, panelHeight, gridSize, showSeams);
+                case STRAIGHT -> renderStraight(contentGraphics, panelWidth, panelHeight, geometry, showSeams);
+                case HALF_DROP -> renderHalfDrop(contentGraphics, panelWidth, panelHeight, geometry, showSeams);
+                case MIRROR -> renderMirror(contentGraphics, panelWidth, panelHeight, geometry, showSeams);
             }
         } finally {
             contentGraphics.dispose();
@@ -66,16 +86,13 @@ public class RapportRenderer {
      * Straight repeat: the source image is tiled on a plain grid, all rows and
      * columns aligned with no offset between them.
      */
-    private void renderStraight(Graphics2D g2d, BufferedImage image, int panelWidth, int panelHeight,
-                                 int gridSize, boolean showSeams) {
-        TileGeometry geometry = TileGeometry.of(image, panelWidth, panelHeight, gridSize);
+    private void renderStraight(Graphics2D g2d, int panelWidth, int panelHeight,
+                                 TileGeometry geometry, boolean showSeams) {
         TileRange range = computeTileRange(g2d, panelWidth, panelHeight, geometry, 1);
 
         for (int row = range.rowStart(); row <= range.rowEnd(); row++) {
             for (int col = range.colStart(); col <= range.colEnd(); col++) {
-                double x = geometry.tileLeft(col);
-                double y = geometry.tileTop(row);
-                drawTile(g2d, image, x, y, geometry, showSeams);
+                drawTile(g2d, geometry, geometry.tileLeft(col), geometry.tileTop(row), showSeams);
             }
         }
     }
@@ -84,12 +101,10 @@ public class RapportRenderer {
      * Half-drop repeat: same grid as the straight repeat, but odd columns are
      * shifted down by half the motif's height, following the textile convention.
      */
-    private void renderHalfDrop(Graphics2D g2d, BufferedImage image, int panelWidth, int panelHeight,
-                                 int gridSize, boolean showSeams) {
-        TileGeometry geometry = TileGeometry.of(image, panelWidth, panelHeight, gridSize);
+    private void renderHalfDrop(Graphics2D g2d, int panelWidth, int panelHeight,
+                                 TileGeometry geometry, boolean showSeams) {
         // Extra row margin so the vertical offset never leaves a gap at the panel's edges
         TileRange range = computeTileRange(g2d, panelWidth, panelHeight, geometry, 2);
-
         double halfTileHeight = geometry.tileHeight() / 2;
 
         for (int col = range.colStart(); col <= range.colEnd(); col++) {
@@ -97,8 +112,7 @@ public class RapportRenderer {
             double x = geometry.tileLeft(col);
 
             for (int row = range.rowStart(); row <= range.rowEnd(); row++) {
-                double y = geometry.tileTop(row) + columnOffsetY;
-                drawTile(g2d, image, x, y, geometry, showSeams);
+                drawTile(g2d, geometry, x, geometry.tileTop(row) + columnOffsetY, showSeams);
             }
         }
     }
@@ -108,44 +122,89 @@ public class RapportRenderer {
      * horizontal-only, vertical-only, or both — a checkerboard of orientations),
      * so the motif mirrors continuously across every shared edge between neighbors.
      */
-    private void renderMirror(Graphics2D g2d, BufferedImage image, int panelWidth, int panelHeight,
-                               int gridSize, boolean showSeams) {
-        TileGeometry geometry = TileGeometry.of(image, panelWidth, panelHeight, gridSize);
+    private void renderMirror(Graphics2D g2d, int panelWidth, int panelHeight,
+                               TileGeometry geometry, boolean showSeams) {
         TileRange range = computeTileRange(g2d, panelWidth, panelHeight, geometry, 1);
 
         for (int row = range.rowStart(); row <= range.rowEnd(); row++) {
             boolean flipVertical = Math.floorMod(row, 2) != 0;
             for (int col = range.colStart(); col <= range.colEnd(); col++) {
                 boolean flipHorizontal = Math.floorMod(col, 2) != 0;
-                double x = geometry.tileLeft(col);
-                double y = geometry.tileTop(row);
-                drawTile(g2d, image, x, y, geometry, flipHorizontal, flipVertical, showSeams);
+                drawTile(g2d, geometry, geometry.tileLeft(col), geometry.tileTop(row),
+                        flipHorizontal, flipVertical, showSeams);
             }
         }
     }
 
-    private void drawTile(Graphics2D g2d, BufferedImage image, double x, double y,
-                           TileGeometry geometry, boolean showSeams) {
-        drawTile(g2d, image, x, y, geometry, false, false, showSeams);
+    private void drawTile(Graphics2D g2d, TileGeometry geometry, double x, double y, boolean showSeams) {
+        drawTile(g2d, geometry, x, y, false, false, showSeams);
     }
 
-    private void drawTile(Graphics2D g2d, BufferedImage image, double x, double y, TileGeometry geometry,
+    private void drawTile(Graphics2D g2d, TileGeometry geometry, double x, double y,
                            boolean flipHorizontal, boolean flipVertical, boolean showSeams) {
-        // Flipping is a negative scale anchored at the tile's far edge, so the
-        // mirrored image still exactly fills the same [x, x+tileWidth] x [y, y+tileHeight] rectangle
-        double originX = x + (flipHorizontal ? geometry.tileWidth() : 0);
-        double originY = y + (flipVertical ? geometry.tileHeight() : 0);
-        double scaleX = flipHorizontal ? -geometry.scaleX() : geometry.scaleX();
-        double scaleY = flipVertical ? -geometry.scaleY() : geometry.scaleY();
+        BufferedImage tile = getCachedTile(flipHorizontal, flipVertical);
 
+        // The cached tile is already ~tileWidth x ~tileHeight, so this is a near
+        // 1:1 blit rather than a resample of the (possibly much larger) source image
         AffineTransform tileTransform = new AffineTransform();
-        tileTransform.translate(originX, originY);
-        tileTransform.scale(scaleX, scaleY);
-        g2d.drawImage(image, tileTransform, null);
+        tileTransform.translate(x, y);
+        tileTransform.scale(geometry.tileWidth() / tile.getWidth(), geometry.tileHeight() / tile.getHeight());
+        g2d.drawImage(tile, tileTransform, null);
 
         if (showSeams) {
             g2d.draw(new Rectangle2D.Double(x, y, geometry.tileWidth(), geometry.tileHeight()));
         }
+    }
+
+    /**
+     * Ensures the tile cache matches the current source image and tile size,
+     * clearing it whenever either changes (new image, grid size, or panel resize).
+     * Zooming/panning alone never changes tile size, since it is applied by the
+     * caller's view transform rather than by resizing the tiles themselves.
+     */
+    private void refreshTileCache(BufferedImage image, TileGeometry geometry) {
+        int tileWidthPx = Math.max(1, (int) Math.round(geometry.tileWidth()));
+        int tileHeightPx = Math.max(1, (int) Math.round(geometry.tileHeight()));
+
+        if (image != cachedSourceImage || tileWidthPx != cachedTileWidthPx || tileHeightPx != cachedTileHeightPx) {
+            tileCache.clear();
+            cachedSourceImage = image;
+            cachedTileWidthPx = tileWidthPx;
+            cachedTileHeightPx = tileHeightPx;
+        }
+    }
+
+    private BufferedImage getCachedTile(boolean flipHorizontal, boolean flipVertical) {
+        return tileCache.computeIfAbsent(new FlipKey(flipHorizontal, flipVertical),
+                key -> renderScaledTile(cachedSourceImage, cachedTileWidthPx, cachedTileHeightPx,
+                        key.flipHorizontal(), key.flipVertical()));
+    }
+
+    // Pre-scales (and, for mirror mode, pre-flips) the source image once per
+    // orientation, so repeated tile draws are cheap instead of resampling the
+    // full source image on every single one.
+    private BufferedImage renderScaledTile(BufferedImage source, int width, int height,
+                                            boolean flipHorizontal, boolean flipVertical) {
+        BufferedImage scaled = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g2d = scaled.createGraphics();
+        try {
+            g2d.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+
+            // Flipping is a negative scale anchored at the far edge, so the result
+            // still exactly fills the [0, width] x [0, height] rectangle
+            double originX = flipHorizontal ? width : 0;
+            double originY = flipVertical ? height : 0;
+            double scaleX = (flipHorizontal ? -1 : 1) * ((double) width / source.getWidth());
+            double scaleY = (flipVertical ? -1 : 1) * ((double) height / source.getHeight());
+
+            AffineTransform transform = new AffineTransform();
+            transform.translate(originX, originY);
+            transform.scale(scaleX, scaleY);
+            g2d.drawImage(source, transform, null);
+        } finally {
+            g2d.dispose();
+        }
+        return scaled;
     }
 
     private Color seamColor(SeamStyle seamStyle) {
@@ -205,16 +264,12 @@ public class RapportRenderer {
      * Tile size and panel-center reference shared by every repeat strategy.
      * Tile width comes from gridSize; tile height follows the image's aspect ratio.
      */
-    private record TileGeometry(double tileWidth, double tileHeight, double centerX, double centerY,
-                                 double scaleX, double scaleY) {
+    private record TileGeometry(double tileWidth, double tileHeight, double centerX, double centerY) {
 
         static TileGeometry of(BufferedImage image, int panelWidth, int panelHeight, int gridSize) {
             double tileWidth = (double) panelWidth / gridSize;
             double tileHeight = tileWidth * image.getHeight() / image.getWidth();
-            return new TileGeometry(
-                    tileWidth, tileHeight,
-                    panelWidth / 2.0, panelHeight / 2.0,
-                    tileWidth / image.getWidth(), tileHeight / image.getHeight());
+            return new TileGeometry(tileWidth, tileHeight, panelWidth / 2.0, panelHeight / 2.0);
         }
 
         double tileLeft(int col) {
@@ -227,5 +282,8 @@ public class RapportRenderer {
     }
 
     private record TileRange(int colStart, int colEnd, int rowStart, int rowEnd) {
+    }
+
+    private record FlipKey(boolean flipHorizontal, boolean flipVertical) {
     }
 }
