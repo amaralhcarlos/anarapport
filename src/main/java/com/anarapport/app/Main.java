@@ -8,12 +8,18 @@ import com.anarapport.model.AppState;
 import com.anarapport.model.ImageMetadata;
 import com.anarapport.model.RapportType;
 import com.anarapport.model.SeamStyle;
+import com.anarapport.ui.ImageFileChooserThumbnails;
 import com.anarapport.ui.ImageInfoDialog;
 import com.anarapport.ui.ImagePanel;
 
+import javax.swing.AbstractAction;
+import javax.swing.Action;
 import javax.swing.BorderFactory;
 import javax.swing.BoxLayout;
 import javax.swing.ButtonGroup;
+import javax.swing.Icon;
+import javax.swing.ImageIcon;
+import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JFileChooser;
@@ -33,9 +39,15 @@ import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
 import javax.swing.filechooser.FileNameExtensionFilter;
 import java.awt.BorderLayout;
+import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
+import java.awt.Graphics2D;
+import java.awt.GridBagConstraints;
+import java.awt.GridBagLayout;
+import java.awt.RenderingHints;
+import java.awt.event.ActionEvent;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
@@ -114,33 +126,89 @@ public class Main {
     }
 
     /**
-     * (Re)builds the frame's chrome -- title, menu bar, toolbar and controls
-     * panel -- so a live language switch can refresh every piece of text
-     * without touching {@code appState}/{@code imagePanel} (the loaded image,
-     * zoom/pan, grid size, offsets and seam settings are left untouched).
+     * (Re)builds the frame's chrome -- title, menu bar, quick-access toolbar
+     * and display-options panel -- so a live language switch can refresh
+     * every piece of text without touching {@code appState}/{@code imagePanel}
+     * (the loaded image, zoom/pan, grid size, offsets and seam settings are
+     * left untouched).
      */
     private static void rebuildChrome(JFrame frame, AppState appState, ImagePanel imagePanel,
                                        Map<RapportType, JToggleButton> rapportModeButtons) {
         frame.setTitle(Messages.get("app.title"));
 
-        rapportModeButtons.clear();
-        JToolBar rapportModeToolBar = buildRapportModeToolBar(appState, rapportModeButtons);
+        // Shared by the "File" menu item and the toolbar button below, so
+        // opening a file only has one place its logic lives; both widgets stay
+        // in sync (enabled state, text, icon) for free via the Action contract.
+        LoadImageAction loadImageAction = new LoadImageAction(frame, appState);
 
-        JPanel northPanel = new JPanel(new BorderLayout());
-        northPanel.add(rapportModeToolBar, BorderLayout.NORTH);
-        northPanel.add(buildControlsPanel(appState), BorderLayout.SOUTH);
+        rapportModeButtons.clear();
+        JToolBar mainToolBar = buildMainToolBar(loadImageAction);
+        JPanel displayOptionsPanel = buildDisplayOptionsPanel(appState, rapportModeButtons);
 
         BorderLayout layout = (BorderLayout) frame.getContentPane().getLayout();
-        Component oldNorth = layout.getLayoutComponent(BorderLayout.NORTH);
-        if (oldNorth != null) {
-            frame.remove(oldNorth);
-        }
-        frame.add(northPanel, BorderLayout.NORTH);
+        replaceLayoutComponent(frame, layout, BorderLayout.NORTH, mainToolBar);
+        replaceLayoutComponent(frame, layout, BorderLayout.SOUTH, displayOptionsPanel);
 
-        frame.setJMenuBar(buildMenuBar(frame, appState, imagePanel));
+        frame.setJMenuBar(buildMenuBar(frame, appState, imagePanel, loadImageAction));
 
         frame.revalidate();
         frame.repaint();
+    }
+
+    private static void replaceLayoutComponent(JFrame frame, BorderLayout layout, String constraint, Component replacement) {
+        Component old = layout.getLayoutComponent(constraint);
+        if (old != null) {
+            frame.remove(old);
+        }
+        frame.add(replacement, constraint);
+    }
+
+    /**
+     * Quick-access toolbar docked at the top of the window, holding only the
+     * "load image" button -- the action the user reaches for first and most
+     * often, kept separate from the display-related controls at the bottom.
+     */
+    private static JToolBar buildMainToolBar(LoadImageAction loadImageAction) {
+        JToolBar toolBar = new JToolBar();
+        toolBar.setFloatable(false);
+
+        JButton loadImageButton = new JButton(loadImageAction);
+        loadImageButton.setHideActionText(true);
+        toolBar.add(loadImageButton);
+        return toolBar;
+    }
+
+    /**
+     * "Display options" section docked at the bottom of the window: rapport
+     * mode, grid size, cell offsets and the seam overlay -- everything that
+     * changes how the loaded image is rendered, grouped together under one
+     * titled border rather than scattered across the chrome.
+     *
+     * <p>Rows are stacked with GridBagLayout ({@code fill=HORIZONTAL},
+     * {@code weightx=1}) rather than a BoxLayout: BoxLayout's per-row
+     * alignmentX turned out unreliable here (a row could end up flush right
+     * instead of left), whereas a GridBagLayout row always spans the full
+     * width, so the FlowLayout(LEFT) content inside it reliably hugs the left
+     * edge.
+     */
+    private static JPanel buildDisplayOptionsPanel(AppState appState, Map<RapportType, JToggleButton> rapportModeButtons) {
+        JPanel panel = new JPanel(new GridBagLayout());
+        panel.setBorder(BorderFactory.createTitledBorder(Messages.get("displayOptions.title")));
+
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.gridx = 0;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        gbc.weightx = 1.0;
+
+        JPanel rapportModeRow = buildRapportModeRow(appState, rapportModeButtons);
+        rapportModeRow.setBorder(BorderFactory.createTitledBorder(Messages.get("displayOptions.rapportStyle")));
+
+        gbc.gridy = 0;
+        panel.add(rapportModeRow, gbc);
+
+        gbc.gridy = 1;
+        panel.add(buildControlsPanel(appState), gbc);
+        return panel;
     }
 
     private static Locale loadSavedLocale() {
@@ -160,13 +228,16 @@ public class Main {
     }
 
     /**
-     * Toolbar with one mutually-exclusive toggle button per RapportType, so the user
+     * Row of one mutually-exclusive toggle button per RapportType, so the user
      * can switch modes at any time. Switching only updates AppState.rapportType; the
      * panel's current zoom/pan is untouched, so the grid redraws in place.
+     *
+     * <p>A plain left-aligned FlowLayout panel rather than a JToolBar: JToolBar
+     * ignores {@code setAlignmentX}, which threw its row out of alignment with
+     * the rest of the display-options section when stacked in a BoxLayout.
      */
-    private static JToolBar buildRapportModeToolBar(AppState appState, Map<RapportType, JToggleButton> buttonsByType) {
-        JToolBar toolBar = new JToolBar();
-        toolBar.setFloatable(false);
+    private static JPanel buildRapportModeRow(AppState appState, Map<RapportType, JToggleButton> buttonsByType) {
+        JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT));
 
         ButtonGroup group = new ButtonGroup();
         for (RapportType type : RapportType.values()) {
@@ -174,19 +245,18 @@ public class Main {
             button.setSelected(type == appState.getRapportType());
             button.addActionListener(event -> appState.setRapportType(type));
             group.add(button);
-            toolBar.add(button);
+            row.add(button);
             buttonsByType.put(type, button);
         }
-        return toolBar;
+        return row;
     }
 
-    private static JMenuBar buildMenuBar(JFrame parentFrame, AppState appState, ImagePanel imagePanel) {
+    private static JMenuBar buildMenuBar(JFrame parentFrame, AppState appState, ImagePanel imagePanel,
+                                          LoadImageAction loadImageAction) {
         JMenuBar menuBar = new JMenuBar();
 
         JMenu fileMenu = new JMenu(Messages.get("menu.file"));
-        JMenuItem openImageItem = new JMenuItem(Messages.get("menu.file.open"));
-        openImageItem.addActionListener(event -> openImage(parentFrame, appState, openImageItem));
-        fileMenu.add(openImageItem);
+        fileMenu.add(new JMenuItem(loadImageAction));
 
         fileMenu.addSeparator();
 
@@ -306,17 +376,23 @@ public class Main {
     }
 
     /**
-     * Loading decodes an image file and reads its technical metadata (disk I/O +
+     * Opens the file chooser and loads the picked image into {@code appState}.
+     * Shared by the "File" menu item and the toolbar button -- both are built
+     * from the same {@link Action} instance, so this is the only place the
+     * open/load logic lives.
+     *
+     * <p>Loading decodes an image file and reads its technical metadata (disk I/O +
      * decoding + header parsing), which can take a noticeable while for large
      * files, so both run off the EDT in a single SwingWorker; only the file
      * chooser and the final AppState update happen on the EDT. The metadata is
      * only shown on demand via "Imagem > Informações da imagem...".
      */
-    private static void openImage(JFrame parentFrame, AppState appState, JMenuItem triggeringItem) {
+    private static void openImage(JFrame parentFrame, AppState appState, Action triggeringAction) {
         JFileChooser fileChooser = new JFileChooser();
         // Every format the JDK's own ImageIO can decode without extra plugins
         fileChooser.setFileFilter(new FileNameExtensionFilter(Messages.get("fileChooser.openFilter"),
                 "png", "jpg", "jpeg", "tif", "tiff", "bmp", "gif"));
+        ImageFileChooserThumbnails.install(fileChooser);
 
         int result = fileChooser.showOpenDialog(parentFrame);
         if (result != JFileChooser.APPROVE_OPTION) {
@@ -324,7 +400,7 @@ public class Main {
         }
 
         File selectedFile = fileChooser.getSelectedFile();
-        triggeringItem.setEnabled(false);
+        triggeringAction.setEnabled(false);
         new SwingWorker<LoadedImage, Void>() {
             @Override
             protected LoadedImage doInBackground() throws IOException {
@@ -335,7 +411,7 @@ public class Main {
 
             @Override
             protected void done() {
-                triggeringItem.setEnabled(true);
+                triggeringAction.setEnabled(true);
                 try {
                     LoadedImage loaded = get();
                     appState.setImage(loaded.image());
@@ -352,6 +428,48 @@ public class Main {
     }
 
     private record LoadedImage(BufferedImage image, ImageMetadata metadata) {
+    }
+
+    /**
+     * Action behind both the "File > Open image" menu item and the toolbar
+     * button, so the pair share one enabled/disabled state and one code path
+     * for showing the file chooser and loading the picked image.
+     */
+    private static final class LoadImageAction extends AbstractAction {
+
+        private final JFrame parentFrame;
+        private final AppState appState;
+
+        LoadImageAction(JFrame parentFrame, AppState appState) {
+            super(Messages.get("menu.file.open"), buildLoadImageIcon());
+            this.parentFrame = parentFrame;
+            this.appState = appState;
+            putValue(Action.SHORT_DESCRIPTION, Messages.get("toolbar.loadImage.tooltip"));
+        }
+
+        @Override
+        public void actionPerformed(ActionEvent event) {
+            openImage(parentFrame, appState, this);
+        }
+    }
+
+    /** Small programmatically-drawn "picture" glyph, so the toolbar button needs no bundled image asset. */
+    private static Icon buildLoadImageIcon() {
+        int size = 16;
+        BufferedImage image = new BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g2 = image.createGraphics();
+        try {
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            g2.setColor(new Color(0x4A, 0x7A, 0xB5));
+            g2.drawRect(1, 2, size - 3, size - 5);
+            g2.setColor(new Color(0xE8, 0xB3, 0x3D));
+            g2.fillOval(3, 4, 3, 3);
+            g2.setColor(new Color(0x5C, 0x8A, 0x5C));
+            g2.fillPolygon(new int[] {2, 7, 11, 14}, new int[] {size - 4, size - 9, size - 6, size - 4}, 4);
+        } finally {
+            g2.dispose();
+        }
+        return new ImageIcon(image);
     }
 
     /**
