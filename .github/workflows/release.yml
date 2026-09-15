@@ -1,17 +1,75 @@
 name: Release
 
-# Triggered by pushing a version tag, e.g.:
-#   git tag v1.0.0 && git push origin v1.0.0
+# Triggered two ways:
+#   1. Automatically when a PR is merged into main: a new vX.Y.Z tag is
+#      computed from the latest existing tag and the PR's version:major /
+#      version:minor / version:patch label (defaults to minor if no label
+#      is set), then created and pushed.
+#   2. Manually, by pushing a version tag yourself:
+#        git tag v1.2.3 && git push origin v1.2.3
 on:
   push:
     tags:
       - 'v*'
+  pull_request:
+    types: [closed]
+    branches: [main]
 
 permissions:
   contents: write
 
 jobs:
+  tag:
+    if: github.event_name == 'pull_request' && github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.compute.outputs.tag }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute next version
+        id: compute
+        env:
+          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        run: |
+          set -e
+          BUMP="minor"
+          case ",$LABELS," in
+            *,version:major,*) BUMP="major" ;;
+            *,version:patch,*) BUMP="patch" ;;
+            *,version:minor,*) BUMP="minor" ;;
+          esac
+
+          LATEST=$(git tag -l 'v*.*.*' | sort -V | tail -n1)
+          if [ -z "$LATEST" ]; then LATEST="v0.0.0"; fi
+          VERSION=${LATEST#v}
+          MAJOR=$(echo "$VERSION" | cut -d. -f1)
+          MINOR=$(echo "$VERSION" | cut -d. -f2)
+          PATCH=$(echo "$VERSION" | cut -d. -f3)
+
+          case "$BUMP" in
+            major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
+            minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
+            patch) PATCH=$((PATCH + 1)) ;;
+          esac
+
+          NEW_TAG="v${MAJOR}.${MINOR}.${PATCH}"
+          echo "Bumping $LATEST -> $NEW_TAG ($BUMP)"
+          echo "tag=$NEW_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Create and push tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "${{ steps.compute.outputs.tag }}" -m "Release ${{ steps.compute.outputs.tag }}: ${{ github.event.pull_request.title }}"
+          git push origin "${{ steps.compute.outputs.tag }}"
+
   build-and-release:
+    needs: [tag]
+    if: always() && (needs.tag.result == 'success' || needs.tag.result == 'skipped')
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -30,11 +88,13 @@ jobs:
       - name: Create GitHub Release and upload jar
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ needs.tag.outputs.tag || github.ref_name }}
           files: target/anarapport.jar
           generate_release_notes: true
 
   build-windows-exe:
-    needs: build-and-release
+    needs: [tag, build-and-release]
+    if: always() && needs.build-and-release.result == 'success'
     runs-on: windows-latest
     steps:
       - name: Check out repository
@@ -52,7 +112,9 @@ jobs:
 
       - name: Determine app version from tag
         shell: bash
-        run: echo "APP_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+        run: |
+          TAG="${{ needs.tag.outputs.tag || github.ref_name }}"
+          echo "APP_VERSION=${TAG#v}" >> "$GITHUB_ENV"
 
       - name: Package a self-contained Windows app with jpackage
         shell: bash
@@ -75,4 +137,5 @@ jobs:
       - name: Upload the Windows build to the release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ needs.tag.outputs.tag || github.ref_name }}
           files: AnaRapport-windows.zip
