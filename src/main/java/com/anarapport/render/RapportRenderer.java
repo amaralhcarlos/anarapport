@@ -48,12 +48,20 @@ public class RapportRenderer {
      * of the graphics context, so the caller's original Graphics2D is left untouched
      * and can safely be reused afterwards to draw an overlay or UI elements that
      * must not be affected by zoom/pan.
+     *
+     * <p>{@code motifWidth} is the cell width in world (pre-zoom/pan) units --
+     * either derived from a fixed grid count ({@code panelWidth / gridSize}, the
+     * "fit to view" mode) or from a physical-size calculation ({@code
+     * screenPixelsPerCm * imageWidthCm}, "real size" mode). Either way, however
+     * many repetitions fit the visible area is worked out dynamically below from
+     * this size and the current view transform -- the caller never needs to
+     * compute a row/column count itself.
      */
     public void render(Graphics2D g2d, BufferedImage image, int panelWidth, int panelHeight,
-                        int gridSize, RapportType type, AffineTransform viewTransform,
+                        double motifWidth, RapportType type, AffineTransform viewTransform,
                         boolean showSeams, SeamStyle seamStyle,
                         double cellOffsetXFraction, double cellOffsetYFraction) {
-        if (image == null || gridSize <= 0 || panelWidth <= 0 || panelHeight <= 0) {
+        if (image == null || motifWidth <= 0 || panelWidth <= 0 || panelHeight <= 0) {
             return;
         }
 
@@ -70,7 +78,7 @@ public class RapportRenderer {
 
             // Geometry (and the pre-scaled tile cache) is shared by every repeat
             // strategy below; only the placement/flip of each tile differs.
-            TileGeometry geometry = TileGeometry.of(image, panelWidth, panelHeight, gridSize,
+            TileGeometry geometry = TileGeometry.of(image, panelWidth, panelHeight, motifWidth,
                     cellOffsetXFraction, cellOffsetYFraction);
             refreshTileCache(image, geometry);
 
@@ -266,18 +274,17 @@ public class RapportRenderer {
 
     /**
      * Motif size, pitch (spacing between tile origins) and panel-center reference
-     * shared by every repeat strategy. Motif width comes from gridSize; motif
-     * height follows the image's aspect ratio. Pitch equals motif size plus the
-     * cell offset/gap: a positive offset spaces cells apart (visible gap/seam), a
+     * shared by every repeat strategy. Motif height follows the image's aspect
+     * ratio from the given motif width. Pitch equals motif size plus the cell
+     * offset/gap: a positive offset spaces cells apart (visible gap/seam), a
      * negative one overlaps them, while zero (the default) reproduces the old
      * edge-to-edge tiling exactly (pitch == motif size).
      */
     private record TileGeometry(double motifWidth, double motifHeight, double pitchX, double pitchY,
                                  double centerX, double centerY) {
 
-        static TileGeometry of(BufferedImage image, int panelWidth, int panelHeight, int gridSize,
+        static TileGeometry of(BufferedImage image, int panelWidth, int panelHeight, double motifWidth,
                                 double cellOffsetXFraction, double cellOffsetYFraction) {
-            double motifWidth = (double) panelWidth / gridSize;
             double motifHeight = motifWidth * image.getHeight() / image.getWidth();
             double pitchX = motifWidth * (1 + cellOffsetXFraction);
             double pitchY = motifHeight * (1 + cellOffsetYFraction);
