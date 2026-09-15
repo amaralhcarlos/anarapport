@@ -16,6 +16,17 @@
         <mainClass>com.anarapport.app.Main</mainClass>
     </properties>
 
+    <dependencies>
+        <!-- Reads real per-monitor hardware info (EDID) for screen calibration;
+             java.awt.Toolkit.getScreenResolution() cannot be trusted for this
+             (it reports a fixed 96 DPI on most platforms). -->
+        <dependency>
+            <groupId>com.github.oshi</groupId>
+            <artifactId>oshi-core</artifactId>
+            <version>7.6.1</version>
+        </dependency>
+    </dependencies>
+
     <build>
         <finalName>anarapport</finalName>
         <plugins>
