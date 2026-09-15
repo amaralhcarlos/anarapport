@@ -1,5 +1,6 @@
 package com.anarapport.app;
 
+import com.anarapport.calibration.ScreenCalibration;
 import com.anarapport.i18n.Messages;
 import com.anarapport.io.ImageExporter;
 import com.anarapport.io.ImageLoader;
@@ -11,6 +12,8 @@ import com.anarapport.model.SeamStyle;
 import com.anarapport.ui.ImageFileChooserThumbnails;
 import com.anarapport.ui.ImageInfoDialog;
 import com.anarapport.ui.ImagePanel;
+import com.anarapport.ui.ImagePanelViewport;
+import com.anarapport.ui.ScreenCalibrationDialog;
 
 import javax.swing.AbstractAction;
 import javax.swing.Action;
@@ -21,6 +24,7 @@ import javax.swing.Icon;
 import javax.swing.ImageIcon;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
+import javax.swing.JCheckBoxMenuItem;
 import javax.swing.JComboBox;
 import javax.swing.JFileChooser;
 import javax.swing.JFrame;
@@ -31,6 +35,7 @@ import javax.swing.JMenuItem;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JRadioButtonMenuItem;
+import javax.swing.JScrollPane;
 import javax.swing.JSpinner;
 import javax.swing.JToggleButton;
 import javax.swing.JToolBar;
@@ -38,22 +43,26 @@ import javax.swing.SpinnerNumberModel;
 import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
 import javax.swing.filechooser.FileNameExtensionFilter;
+import java.awt.BasicStroke;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
+import java.awt.Font;
 import java.awt.Graphics2D;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.RenderingHints;
 import java.awt.event.ActionEvent;
+import java.awt.event.ItemEvent;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
 import java.util.EnumMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ExecutionException;
 import java.util.prefs.Preferences;
 
@@ -86,6 +95,33 @@ public class Main {
         // keeps working against whatever buttons currently exist.
         Map<RapportType, JToggleButton> rapportModeButtons = new EnumMap<>(RapportType.class);
 
+        // Holds the current "real size" toggle button, refreshed by every chrome
+        // rebuild, so ImagePanel's real-size-deactivated callback (registered once,
+        // below) always reaches whichever button instance currently exists.
+        JToggleButton[] realSizeButtonHolder = new JToggleButton[1];
+        imagePanel.setRealSizeDeactivatedListener(() -> {
+            if (realSizeButtonHolder[0] != null) {
+                realSizeButtonHolder[0].setSelected(false);
+            }
+        });
+
+        // A DPI the user typed in for an image whose metadata doesn't carry one,
+        // kept only in memory (never persisted) and reused for the rest of this
+        // run so "real size" doesn't ask again every time it's toggled back on.
+        Double[] sessionAssumedDpi = new Double[1];
+
+        // Holds the current grid-size spinner, refreshed by every chrome rebuild,
+        // so the "real size" toggle can disable/enable it (it no longer applies
+        // once the grid's cell count is derived from the image's physical size
+        // instead of a fixed count).
+        JSpinner[] gridSizeSpinnerHolder = new JSpinner[1];
+
+        // Whether the user has turned rulers on; kept only in memory (like the
+        // measuring tool's on/off state, which lives directly on ImagePanel) --
+        // neither is persisted across runs. Defaults off until the user opts in,
+        // since both require calibration first.
+        boolean[] rulersVisible = new boolean[1];
+
         // Keep the panel (and toolbar selection) in sync with the model whenever it changes
         appState.addPropertyChangeListener(event -> {
             switch (event.getPropertyName()) {
@@ -115,14 +151,59 @@ public class Main {
         frame.setMinimumSize(new Dimension(720, 520));
         frame.setLocationRelativeTo(null);
         frame.setLayout(new BorderLayout());
-        frame.add(imagePanel, BorderLayout.CENTER);
 
-        Runnable rebuildChrome = () -> rebuildChrome(frame, appState, imagePanel, rapportModeButtons);
+        // The scroll pane's headers are the cm rulers (see RulerPanel); the pane
+        // itself never actually scrolls (ImagePanel manages its own pan/zoom) --
+        // it's used purely so the rulers lay out flush around the viewport.
+        // Captured as plain Components so ruler visibility can be toggled
+        // (setColumnHeaderView(null)/back) without this class ever needing to
+        // know about the package-private RulerPanel itself.
+        JScrollPane imageScrollPane = ImagePanelViewport.wrap(imagePanel);
+        Component rulerColumnHeader = imageScrollPane.getColumnHeader().getView();
+        Component rulerRowHeader = imageScrollPane.getRowHeader().getView();
+        applyRulerVisibility(imageScrollPane, rulerColumnHeader, rulerRowHeader, rulersVisible[0]);
+        frame.add(imageScrollPane, BorderLayout.CENTER);
+
+        Runnable rebuildChrome = () -> rebuildChrome(frame, appState, imagePanel, rapportModeButtons,
+                realSizeButtonHolder, sessionAssumedDpi, gridSizeSpinnerHolder,
+                imageScrollPane, rulerColumnHeader, rulerRowHeader, rulersVisible);
         rebuildChrome.run();
         // Menu-triggered, so this always runs on the EDT already; no invokeLater needed.
         Messages.addChangeListener(rebuildChrome);
 
         frame.setVisible(true);
+
+        // Reading hardware (EDID via OSHI) can take a noticeable moment, so this
+        // runs off the EDT; only ever applies when the screen isn't already
+        // calibrated (see ScreenCalibration.autoDetectAndSaveIfMissing), so it
+        // never overwrites a manual calibration the user already entered.
+        new SwingWorker<Boolean, Void>() {
+            @Override
+            protected Boolean doInBackground() {
+                return ScreenCalibration.autoDetectAndSaveIfMissing();
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    if (get()) {
+                        rebuildChrome(frame, appState, imagePanel, rapportModeButtons,
+                                realSizeButtonHolder, sessionAssumedDpi, gridSizeSpinnerHolder,
+                                imageScrollPane, rulerColumnHeader, rulerRowHeader, rulersVisible);
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                } catch (ExecutionException e) {
+                    // Best-effort detection; silently keep the screen uncalibrated on failure.
+                }
+            }
+        }.execute();
+    }
+
+    private static void applyRulerVisibility(JScrollPane scrollPane, Component columnHeader, Component rowHeader,
+                                              boolean visible) {
+        scrollPane.setColumnHeaderView(visible ? columnHeader : null);
+        scrollPane.setRowHeaderView(visible ? rowHeader : null);
     }
 
     /**
@@ -133,7 +214,10 @@ public class Main {
      * left untouched).
      */
     private static void rebuildChrome(JFrame frame, AppState appState, ImagePanel imagePanel,
-                                       Map<RapportType, JToggleButton> rapportModeButtons) {
+                                       Map<RapportType, JToggleButton> rapportModeButtons,
+                                       JToggleButton[] realSizeButtonHolder, Double[] sessionAssumedDpi,
+                                       JSpinner[] gridSizeSpinnerHolder, JScrollPane imageScrollPane,
+                                       Component rulerColumnHeader, Component rulerRowHeader, boolean[] rulersVisible) {
         frame.setTitle(Messages.get("app.title"));
 
         // Shared by the "File" menu item and the toolbar button below, so
@@ -142,14 +226,22 @@ public class Main {
         LoadImageAction loadImageAction = new LoadImageAction(frame, appState);
 
         rapportModeButtons.clear();
-        JToolBar mainToolBar = buildMainToolBar(loadImageAction);
-        JPanel displayOptionsPanel = buildDisplayOptionsPanel(appState, rapportModeButtons);
+        JToolBar mainToolBar = buildMainToolBar(loadImageAction, frame, appState, imagePanel,
+                sessionAssumedDpi, realSizeButtonHolder, gridSizeSpinnerHolder);
+        JPanel displayOptionsPanel = buildDisplayOptionsPanel(appState, imagePanel, rapportModeButtons, gridSizeSpinnerHolder);
 
         BorderLayout layout = (BorderLayout) frame.getContentPane().getLayout();
         replaceLayoutComponent(frame, layout, BorderLayout.NORTH, mainToolBar);
         replaceLayoutComponent(frame, layout, BorderLayout.SOUTH, displayOptionsPanel);
 
-        frame.setJMenuBar(buildMenuBar(frame, appState, imagePanel, loadImageAction));
+        // Rebuilding the whole chrome is cheap and already how a language switch
+        // refreshes text, so the calibration menu item just reuses it to refresh
+        // the status label after a successful (re)calibration.
+        Runnable refreshChrome = () -> rebuildChrome(frame, appState, imagePanel, rapportModeButtons,
+                realSizeButtonHolder, sessionAssumedDpi, gridSizeSpinnerHolder,
+                imageScrollPane, rulerColumnHeader, rulerRowHeader, rulersVisible);
+        frame.setJMenuBar(buildMenuBar(frame, appState, imagePanel, loadImageAction, refreshChrome,
+                imageScrollPane, rulerColumnHeader, rulerRowHeader, rulersVisible));
 
         frame.revalidate();
         frame.repaint();
@@ -164,18 +256,196 @@ public class Main {
     }
 
     /**
-     * Quick-access toolbar docked at the top of the window, holding only the
-     * "load image" button -- the action the user reaches for first and most
-     * often, kept separate from the display-related controls at the bottom.
+     * Quick-access toolbar docked at the top of the window: the "load image"
+     * button -- the action the user reaches for first and most often -- next
+     * to the "real size" toggle, both kept separate from the display-related
+     * controls (including zoom) at the bottom, plus a discreet
+     * screen-calibration status label.
      */
-    private static JToolBar buildMainToolBar(LoadImageAction loadImageAction) {
+    private static JToolBar buildMainToolBar(LoadImageAction loadImageAction, JFrame frame, AppState appState,
+                                              ImagePanel imagePanel, Double[] sessionAssumedDpi,
+                                              JToggleButton[] realSizeButtonHolder, JSpinner[] gridSizeSpinnerHolder) {
         JToolBar toolBar = new JToolBar();
         toolBar.setFloatable(false);
 
         JButton loadImageButton = new JButton(loadImageAction);
         loadImageButton.setHideActionText(true);
         toolBar.add(loadImageButton);
+
+        JToggleButton realSizeButton = new JToggleButton(buildRealSizeIcon());
+        realSizeButton.setToolTipText(Messages.get("toolbar.realSize.tooltip"));
+        // Set before the listener is attached, so restoring the selected state
+        // across a chrome rebuild (e.g. a language switch while active) can't
+        // re-trigger the activation flow below.
+        realSizeButton.setSelected(imagePanel.isRealSizeActive());
+        realSizeButton.addItemListener(event -> {
+            if (event.getStateChange() == ItemEvent.SELECTED) {
+                if (!activateRealSize(frame, appState, imagePanel, sessionAssumedDpi, gridSizeSpinnerHolder)) {
+                    realSizeButton.setSelected(false);
+                }
+            } else {
+                imagePanel.deactivateRealSize();
+                setGridSizeSpinnerEnabled(gridSizeSpinnerHolder, true);
+            }
+        });
+        toolBar.add(realSizeButton);
+        realSizeButtonHolder[0] = realSizeButton;
+
+        boolean calibrated = ScreenCalibration.isCalibrated();
+        JToggleButton measureButton = new JToggleButton(buildMeasureIcon());
+        measureButton.setSelected(imagePanel.isMeasureModeActive());
+        measureButton.setEnabled(calibrated);
+        measureButton.setToolTipText(calibrated
+                ? Messages.get("toolbar.measure.tooltip")
+                : Messages.get("tooltip.calibrationRequired"));
+        measureButton.addItemListener(event ->
+                imagePanel.setMeasureModeActive(event.getStateChange() == ItemEvent.SELECTED));
+        toolBar.add(measureButton);
+
+        toolBar.addSeparator();
+        toolBar.add(buildCalibrationStatusLabel());
         return toolBar;
+    }
+
+    /**
+     * Computes and applies the "real size" base scale (escalaBase): the
+     * image's real physical width (from its DPI, or a user-supplied assumed
+     * DPI when the file has none) times the screen's pixels-per-cm
+     * calibration, divided by the image's pixel width. Also disables the
+     * grid-size control, which stops applying once the cell count is derived
+     * from this physical size instead. Returns whether it actually activated
+     * -- false means the toggle button should revert to unselected (no image
+     * loaded, or the user backed out of calibrating/supplying a DPI).
+     */
+    private static boolean activateRealSize(JFrame frame, AppState appState, ImagePanel imagePanel,
+                                             Double[] sessionAssumedDpi, JSpinner[] gridSizeSpinnerHolder) {
+        BufferedImage image = appState.getImage();
+        ImageMetadata metadata = appState.getImageMetadata();
+        if (image == null || metadata == null) {
+            JOptionPane.showMessageDialog(frame, Messages.get("dialog.noImage.realSize.message"),
+                    Messages.get("dialog.noImage.title"), JOptionPane.WARNING_MESSAGE);
+            return false;
+        }
+
+        if (!ScreenCalibration.isCalibrated() && !ScreenCalibrationDialog.show(frame)) {
+            return false;
+        }
+        Optional<Double> pixelsPerCm = ScreenCalibration.getPixelsPerCm();
+        if (pixelsPerCm.isEmpty()) {
+            return false;
+        }
+
+        double dpiToUse;
+        if (metadata.hasKnownDpi()) {
+            dpiToUse = metadata.horizontalDpi();
+        } else {
+            Double assumedDpi = promptForAssumedDpi(frame, sessionAssumedDpi[0]);
+            if (assumedDpi == null) {
+                return false;
+            }
+            sessionAssumedDpi[0] = assumedDpi;
+            dpiToUse = assumedDpi;
+        }
+
+        double widthCm = metadata.pixelWidth() / dpiToUse * 2.54;
+        double baseScale = pixelsPerCm.get() * widthCm / metadata.pixelWidth();
+        imagePanel.activateRealSize(baseScale);
+        setGridSizeSpinnerEnabled(gridSizeSpinnerHolder, false);
+        return true;
+    }
+
+    private static void setGridSizeSpinnerEnabled(JSpinner[] gridSizeSpinnerHolder, boolean enabled) {
+        if (gridSizeSpinnerHolder[0] != null) {
+            gridSizeSpinnerHolder[0].setEnabled(enabled);
+        }
+    }
+
+    /**
+     * Asks the user for a DPI to assume for an image whose metadata doesn't
+     * carry one, warning that the resulting size won't be precise. Returns
+     * null if the user cancelled. {@code previousValue} pre-fills the field
+     * with whatever was entered earlier this session, if anything.
+     */
+    private static Double promptForAssumedDpi(JFrame frame, Double previousValue) {
+        double defaultValue = previousValue != null ? previousValue : 96.0;
+        SpinnerNumberModel dpiModel = new SpinnerNumberModel(defaultValue, 1.0, 2400.0, 1.0);
+        JSpinner dpiSpinner = new JSpinner(dpiModel);
+
+        JLabel warningLabel = new JLabel("<html><body style='width: 300px'>"
+                + Messages.get("dialog.realSize.noDpi.message") + "</body></html>");
+
+        JPanel fieldRow = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        fieldRow.add(new JLabel(Messages.get("dialog.realSize.assumedDpi.label")));
+        fieldRow.add(dpiSpinner);
+
+        JPanel panel = new JPanel(new BorderLayout(0, 8));
+        panel.add(warningLabel, BorderLayout.NORTH);
+        panel.add(fieldRow, BorderLayout.CENTER);
+
+        int result = JOptionPane.showConfirmDialog(frame, panel, Messages.get("dialog.realSize.noDpi.title"),
+                JOptionPane.OK_CANCEL_OPTION, JOptionPane.WARNING_MESSAGE);
+        return result == JOptionPane.OK_OPTION ? (Double) dpiSpinner.getValue() : null;
+    }
+
+    /** Small programmatically-drawn ruler glyph for the "real size" toggle button. */
+    private static Icon buildRealSizeIcon() {
+        int size = 16;
+        BufferedImage image = new BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g2 = image.createGraphics();
+        try {
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            g2.setColor(new Color(0xB0, 0x6A, 0x2E));
+            g2.setStroke(new BasicStroke(1.5f));
+            g2.drawRect(1, 5, size - 3, 6);
+            g2.drawLine(4, 5, 4, 8);
+            g2.drawLine(7, 5, 7, 8);
+            g2.drawLine(10, 5, 10, 8);
+            g2.drawLine(13, 5, 13, 8);
+        } finally {
+            g2.dispose();
+        }
+        return new ImageIcon(image);
+    }
+
+    /** Small programmatically-drawn crosshair glyph for the "measure" toggle button. */
+    private static Icon buildMeasureIcon() {
+        int size = 16;
+        BufferedImage image = new BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g2 = image.createGraphics();
+        try {
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            g2.setColor(new Color(0x8B, 0x2E, 0x8B));
+            g2.setStroke(new BasicStroke(1.5f));
+            g2.drawOval(3, 3, size - 7, size - 7);
+            g2.drawLine(size / 2, 0, size / 2, size);
+            g2.drawLine(0, size / 2, size, size / 2);
+        } finally {
+            g2.dispose();
+        }
+        return new ImageIcon(image);
+    }
+
+    /**
+     * Small, discreet indicator of whether (and how) the screen has been
+     * calibrated for real-world pixel-to-cm conversion -- deliberately
+     * unobtrusive since most users never need to look at it, but present so
+     * the ones who do calibrate (or wonder why a "real size" feature looks
+     * off) can see at a glance whether it was automatic or manual.
+     */
+    private static JLabel buildCalibrationStatusLabel() {
+        JLabel label = new JLabel();
+        label.setFont(label.getFont().deriveFont(Font.PLAIN, Math.max(10f, label.getFont().getSize2D() - 1f)));
+        label.setForeground(Color.GRAY);
+        label.setText(calibrationStatusText());
+        return label;
+    }
+
+    private static String calibrationStatusText() {
+        return switch (ScreenCalibration.getSource()) {
+            case AUTOMATIC -> Messages.get("calibration.status.automatic");
+            case MANUAL -> Messages.get("calibration.status.manual");
+            case NONE -> Messages.get("calibration.status.none");
+        };
     }
 
     /**
@@ -191,7 +461,9 @@ public class Main {
      * width, so the FlowLayout(LEFT) content inside it reliably hugs the left
      * edge.
      */
-    private static JPanel buildDisplayOptionsPanel(AppState appState, Map<RapportType, JToggleButton> rapportModeButtons) {
+    private static JPanel buildDisplayOptionsPanel(AppState appState, ImagePanel imagePanel,
+                                                    Map<RapportType, JToggleButton> rapportModeButtons,
+                                                    JSpinner[] gridSizeSpinnerHolder) {
         JPanel panel = new JPanel(new GridBagLayout());
         panel.setBorder(BorderFactory.createTitledBorder(Messages.get("displayOptions.title")));
 
@@ -207,7 +479,7 @@ public class Main {
         panel.add(rapportModeRow, gbc);
 
         gbc.gridy = 1;
-        panel.add(buildControlsPanel(appState), gbc);
+        panel.add(buildControlsPanel(appState, imagePanel, gridSizeSpinnerHolder), gbc);
         return panel;
     }
 
@@ -252,7 +524,9 @@ public class Main {
     }
 
     private static JMenuBar buildMenuBar(JFrame parentFrame, AppState appState, ImagePanel imagePanel,
-                                          LoadImageAction loadImageAction) {
+                                          LoadImageAction loadImageAction, Runnable onCalibrationChanged,
+                                          JScrollPane imageScrollPane, Component rulerColumnHeader,
+                                          Component rulerRowHeader, boolean[] rulersVisible) {
         JMenuBar menuBar = new JMenuBar();
 
         JMenu fileMenu = new JMenu(Messages.get("menu.file"));
@@ -272,9 +546,45 @@ public class Main {
         imageMenu.add(imageInfoItem);
         menuBar.add(imageMenu);
 
+        menuBar.add(buildToolsMenu(parentFrame, onCalibrationChanged,
+                imageScrollPane, rulerColumnHeader, rulerRowHeader, rulersVisible));
         menuBar.add(buildLanguageMenu());
 
         return menuBar;
+    }
+
+    private static JMenu buildToolsMenu(JFrame parentFrame, Runnable onCalibrationChanged,
+                                         JScrollPane imageScrollPane, Component rulerColumnHeader,
+                                         Component rulerRowHeader, boolean[] rulersVisible) {
+        JMenu toolsMenu = new JMenu(Messages.get("menu.tools"));
+
+        JMenuItem calibrateScreenItem = new JMenuItem(Messages.get("menu.tools.calibrateScreen"));
+        calibrateScreenItem.addActionListener(event -> {
+            if (ScreenCalibrationDialog.show(parentFrame)) {
+                onCalibrationChanged.run();
+            }
+        });
+        toolsMenu.add(calibrateScreenItem);
+
+        toolsMenu.addSeparator();
+
+        boolean calibrated = ScreenCalibration.isCalibrated();
+        JCheckBoxMenuItem showRulersItem = new JCheckBoxMenuItem(Messages.get("menu.tools.showRulers"));
+        showRulersItem.setSelected(rulersVisible[0]);
+        showRulersItem.setEnabled(calibrated);
+        showRulersItem.setToolTipText(calibrated ? null : Messages.get("tooltip.calibrationRequired"));
+        showRulersItem.addActionListener(event -> {
+            rulersVisible[0] = showRulersItem.isSelected();
+            applyRulerVisibility(imageScrollPane, rulerColumnHeader, rulerRowHeader, rulersVisible[0]);
+            // The popup menu closing at the same moment the header views (and thus
+            // the whole layout below the menu bar) change size can leave a stale
+            // ghost of the popup on screen; force a full repaint to clear it.
+            parentFrame.revalidate();
+            parentFrame.repaint();
+        });
+        toolsMenu.add(showRulersItem);
+
+        return toolsMenu;
     }
 
     private static JMenu buildLanguageMenu() {
@@ -322,7 +632,7 @@ public class Main {
      * that mismatch is what let the second row overlap/hide behind the image
      * panel at the default (non-maximized) window size.
      */
-    private static JPanel buildControlsPanel(AppState appState) {
+    private static JPanel buildControlsPanel(AppState appState, ImagePanel imagePanel, JSpinner[] gridSizeSpinnerHolder) {
         JPanel controlsPanel = new JPanel();
         controlsPanel.setLayout(new BoxLayout(controlsPanel, BoxLayout.Y_AXIS));
         controlsPanel.setBorder(BorderFactory.createEmptyBorder(4, 8, 4, 8));
@@ -331,7 +641,11 @@ public class Main {
         SpinnerNumberModel gridSizeModel = new SpinnerNumberModel(
                 appState.getGridSize(), AppState.MIN_GRID_SIZE, AppState.MAX_GRID_SIZE, 1);
         JSpinner gridSizeSpinner = new JSpinner(gridSizeModel);
+        // Grid size stops applying once "real size" derives the cell count from
+        // the image's physical size instead of this fixed count.
+        gridSizeSpinner.setEnabled(!imagePanel.isRealSizeActive());
         gridSizeSpinner.addChangeListener(event -> appState.setGridSize((Integer) gridSizeSpinner.getValue()));
+        gridSizeSpinnerHolder[0] = gridSizeSpinner;
 
         JLabel offsetXLabel = new JLabel(Messages.get("control.offsetX"));
         SpinnerNumberModel offsetXModel = new SpinnerNumberModel(appState.getCellOffsetXPercent(),
